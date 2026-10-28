@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+WORKLOG.md
+tests/artifacts/
+# Machine-specific local integration harnesses
+tests/fixture.py
+tests/test_adapter.py
+tests/test_i18n.py
+tests/browser.cjs
+tests/frontend.cjs

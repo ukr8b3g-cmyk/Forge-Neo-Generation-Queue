@@ -1,2 +1,82 @@
-# Forge-Neo-Generation-Queue
-Queue txt2img jobs with the existing Generate button in Forge Neo. Compact status, individual cancellation, and optional Quicksettings toggle. English / 日本語.
+# Forge Neo Generation Queue
+
+[日本語 README](README.ja.md)
+
+Queue **txt2img** jobs with Forge Neo's existing **Generate** button. Prepare the next prompt while the current job is running.
+
+- One click adds one job; jobs run sequentially through Forge's existing pipeline.
+- Generate turns **dark green during generation**, then returns to its normal color.
+- A single line shows **Generating · Queued: N**. The pending count excludes the current job.
+- Click the count to view details and cancel individual jobs. The popup does not push the page down.
+- Optional Quicksettings toggle. **OFF by default.**
+- Japanese for Japanese WebUI locales; English for English, unset/`None`, and other locales. Browser/OS language is not used.
+
+## Installation
+
+1. Open **Extensions → Install from URL** in Forge Neo.
+2. Enter this repository URL and click **Install**:
+
+   ```text
+   https://github.com/ukr8b3g-cmyk/Forge-Neo-Generation-Queue
+   ```
+
+3. Restart Forge Neo with your usual launcher and reload the browser.
+
+No additional Python packages are required. For manual installation, place the repository in `extensions/Forge-Neo-Generation-Queue`. Avoid installing a second copy if it is already installed.
+
+## Enable the queue
+
+Open **Settings → Generation Queue**, check **Enable generation queue (txt2img)**, then click **Apply settings**.
+
+![Generation Queue in the Settings sidebar](docs/images/settings-category.png)
+
+The category appears alongside other extension settings. You can enable the queue here without adding it to Quicksettings.
+
+## Add the toggle to Quicksettings
+
+1. Open **Settings → User interface → Quicksettings List**. Searching Settings for `Quicksettings` also works.
+2. Add **`forge_generation_queue_enabled`**. Keep your existing entries.
+3. Click **Apply settings**, then **Reload UI**. Empty the queue before reloading the UI.
+4. **Enable generation queue (txt2img)** now appears as a checkbox at the top of WebUI.
+
+![Add forge_generation_queue_enabled to Quicksettings List](docs/images/quicksettings-list.png)
+
+The screenshot shows the exact option to add. Other entries, such as Clip Skip, can stay as they are. Registration is manual; toggling the checkbox afterward does not require a restart.
+
+## Generate and cancel
+
+| Idle | Generating |
+| --- | --- |
+| ![Idle Generate button and empty queue](docs/images/queue-idle.png) | ![Green Generate button and three pending jobs](docs/images/queue-running.png) |
+
+The orange button is idle. Green means a job is running; **Queued: 3** means three more jobs are waiting. These user-supplied captures show the states; the latest styling reduces the gap below Generate further.
+
+1. Set the prompt and generation inputs, then click **Generate**.
+2. While it runs, prepare the next inputs and click **Generate** again. Confirm the inputs have reached WebUI and the pending count increases.
+3. Jobs run in acceptance order. Batch Count and Batch Size are part of each job.
+4. Click the count for details. **×** on a pending job cancels that job. **×** on the running job requests interruption; the next job starts after interruption finishes.
+5. If generation fails, remaining jobs pause. Check the problem and click **Resume**. The failed job is not retried automatically.
+
+The details popup uses a dark background at **80% opacity (20% transparency)** so the underlying controls show through only faintly.
+
+The limit is **32 running and pending jobs combined**, across the instance. Turning the queue **OFF** stops new queue submissions and lets accepted jobs finish. The count and cancellation controls remain available until it drains.
+
+## Scope and limitations
+
+- **txt2img only.** img2img, standalone Hires, API generation, and other extensions' buttons retain their original entry points.
+- Inputs are copied when accepted. Seed `-1`, Dynamic Prompts, and similar expansion use the normal generation pipeline. Expanded random prompts and external wildcard files are not frozen when submitted.
+- Keep the **same model and shared settings** while jobs are queued. If saved Settings or style definitions change, the next job pauses without being discarded. Restore the original settings and resume, or cancel the job. Global configuration is not automatically restored.
+- **Generate forever** is not combined with queue mode; txt2img auto-repeat is stopped while the queue is enabled.
+- An ordinary reload of the same browser tab reconnects. Closing the tab does not cancel accepted jobs. Ownership does not transfer to another tab/browser.
+- Queues are in memory. **Restarting Forge, Reload UI, or Reload script bodies does not preserve pending jobs.** Empty the queue first.
+- The existing gallery shows the latest completed result. Image saving follows Forge's settings; this is not a separate image-history browser.
+
+## Compatibility and verification
+
+Version **0.1.0** was developed against Forge Neo commit `2900d5948a17ec993075fb810a695ce4f674bd0c`, Gradio **4.40.0**. Other versions have not been verified. If the txt2img event contract differs, the extension logs a warning and leaves the native Generate event unchanged.
+
+Forge's source files are not edited. Its existing txt2img generation pipeline and GPU lock are used. Automated checks cover ordering, cancellation, input copies, locale selection, Gradio integration, and compact UI behavior. Isolated browser generation uses a CPU simulation and **does not establish real Forge/GPU acceptance**. Screenshots are cropped user-supplied WebUI captures. See [testing notes](TESTING.md).
+
+## Disable
+
+Remove the Quicksettings entry if added, disable the extension under **Extensions**, and restart Forge Neo. Existing workflows and generation settings are not rewritten.
