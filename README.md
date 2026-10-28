@@ -6,7 +6,7 @@ Queue **txt2img** jobs with Forge Neo's existing **Generate** button. Prepare th
 
 - One click adds one job; jobs run sequentially through Forge's existing pipeline.
 - Generate turns **dark green during generation**, then returns to its normal color.
-- A single line shows **Generating · Queued: N**. The pending count excludes the current job.
+- A single line shows **Generating · Remaining: N**, including the current job and all waiting jobs. Details show only these unfinished jobs; completed and cancelled jobs disappear.
 - Click the count to view details and cancel individual jobs. The popup does not push the page down.
 - Optional Quicksettings toggle. **OFF by default.**
 - Japanese for Japanese WebUI locales; English for English, unset/`None`, and other locales. Browser/OS language is not used.
@@ -49,10 +49,14 @@ The screenshot shows the exact option to add. Other entries, such as Clip Skip, 
 | --- | --- |
 | ![Idle Generate button and empty queue](docs/images/queue-idle.png) | ![Green Generate button and three pending jobs](docs/images/queue-running.png) |
 
-The orange button is idle. Green means a job is running; **Queued: 3** means three more jobs are waiting. These user-supplied captures show the states; the latest styling reduces the gap below Generate further.
+The orange button is idle. Green means a job is running. These user-supplied captures show the earlier **Queued** label, which counted waiting jobs only. The current **Remaining** count includes the running job: three accepted clicks mean three jobs until one finishes or is cancelled. The latest styling also reduces the gap below Generate.
+
+![Expanded queue during generation: one running job and three waiting jobs](docs/images/queue-details.png)
+
+The current expanded view shows **Generating · Remaining: 4**: **one running job and three waiting jobs**. The four rows match the remaining count. Completed and cancelled jobs are removed from this list. Use **×** to interrupt the running job or cancel a waiting job.
 
 1. Set the prompt and generation inputs, then click **Generate**.
-2. While it runs, prepare the next inputs and click **Generate** again. Confirm the inputs have reached WebUI and the pending count increases.
+2. While it runs, prepare the next inputs and click **Generate** again. Confirm the inputs have reached WebUI and the remaining count increases.
 3. Jobs run in acceptance order. Batch Count and Batch Size are part of each job.
 4. Click the count for details. **×** on a pending job cancels that job. **×** on the running job requests interruption; the next job starts after interruption finishes.
 5. If generation fails, remaining jobs pause. Check the problem and click **Resume**. The failed job is not retried automatically.

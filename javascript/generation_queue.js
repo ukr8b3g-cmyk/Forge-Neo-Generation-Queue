@@ -33,10 +33,12 @@
         const box = el("txt2img_generate_box");
         if (!panel || !box) return;
         // Keep Gradio components in their original DOM tree (delegated events).
-        const ownBusy = (state.rows || []).some(row => ["pending", "waiting", "running"].includes(row.state));
+        // Server history is retained for result delivery and diagnostics, not queue rows.
+        const active = (state.rows || []).filter(row => ["pending", "waiting", "running"].includes(row.state));
+        const ownBusy = active.length > 0;
         const mode = state.ready && (enabled() || ownBusy);
         box.classList.toggle("fq-mode", mode);
-        const running = (state.rows || []).find(row => row.state === "running");
+        const running = active.find(row => row.state === "running");
         box.classList.toggle("fq-generating", !!running);
         panel.style.setProperty("display", enabled() || ownBusy || state.can_resume || error ? "flex" : "none", "important");
         const content = el("fq_content");
@@ -49,11 +51,10 @@
         details.open = expanded;
         const heading = document.createElement("summary");
         heading.className = "fq-heading";
-        const pending = (state.rows || []).filter(row => ["pending", "waiting"].includes(row.state)).length;
         const status = !state.ready ? t("Connecting…", "接続中…") :
             state.paused ? t("Paused", "停止中") : running ?
                 running.cancelling ? t("Interrupting", "中断中") : t("Generating", "生成中") : "";
-        heading.textContent = `${status ? status + " · " : ""}${t(`Queued: ${pending}`, `待機 ${pending}件`)}`;
+        heading.textContent = `${status ? status + " · " : ""}${t(`Remaining: ${active.length}`, `残り ${active.length}件`)}`;
         heading.title = t("Click to view or cancel individual jobs", "クリックで予約の詳細・個別取消");
         details.append(heading);
         content.append(details);
@@ -61,7 +62,8 @@
             const notice = document.createElement("div");
             notice.className = "fq-notice";
             notice.textContent = t("Check queue", "要確認");
-            notice.title = error || state.paused;
+            const failed = (state.rows || []).filter(row => row.state === "failed").at(-1);
+            notice.title = [error || state.paused, state.paused && failed?.error].filter(Boolean).join("\n");
             content.append(notice);
             if (state.can_resume) {
                 const resume = document.createElement("button");
@@ -73,7 +75,7 @@
         }
         const list = document.createElement("div");
         list.className = "fq-list";
-        for (const row of state.rows || []) {
+        for (const row of active) {
             const line = document.createElement("div");
             line.className = "fq-row";
             const label = document.createElement("span");
