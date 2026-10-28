@@ -13,16 +13,35 @@ Queue **txt2img** jobs with Forge Neo's existing **Generate** button. Prepare th
 
 ## Installation
 
+Choose either method below. **Install from URL does not require the extension to be listed in the Available index.** Install only one copy.
+
+### Install from URL
+
 1. Open **Extensions → Install from URL** in Forge Neo.
-2. Enter this repository URL and click **Install**:
-
-   ```text
-   https://github.com/ukr8b3g-cmyk/Forge-Neo-Generation-Queue
-   ```
-
+2. Enter `https://github.com/ukr8b3g-cmyk/Forge-Neo-Generation-Queue.git` and click **Install**.
 3. Restart Forge Neo with your usual launcher and reload the browser.
 
-No additional Python packages are required. For manual installation, place the repository in `extensions/Forge-Neo-Generation-Queue`. Avoid installing a second copy if it is already installed.
+### Git clone
+
+Git is required. Open a terminal in your **Forge Neo installation folder** and run:
+
+```sh
+git clone https://github.com/ukr8b3g-cmyk/Forge-Neo-Generation-Queue.git extensions/Forge-Neo-Generation-Queue
+```
+
+Restart Forge Neo with your usual launcher and reload the browser. No additional Python packages are required. Do not clone a second copy if the extension is already installed.
+
+## Update
+
+After the queue has finished, stop Forge Neo. From the **Forge Neo installation folder**, run:
+
+```sh
+git -C extensions/Forge-Neo-Generation-Queue pull --ff-only
+```
+
+Restart Forge Neo and reload the browser. If Git reports local changes or diverging history, preserve those changes and resolve them before updating; do not force a reset.
+
+These commands require a Git clone. A ZIP or manually copied installation without a `.git` directory cannot use `git pull`. Move that copy outside `extensions` as a backup, then use the installation command above. Keep only one enabled copy.
 
 ## Enable the queue
 
@@ -53,7 +72,7 @@ The orange button is idle. Green means a job is running. These user-supplied cap
 
 ![Expanded queue during generation: one running job and three waiting jobs](docs/images/queue-details.png)
 
-The current expanded view shows **Generating · Remaining: 4**: **one running job and three waiting jobs**. The four rows match the remaining count. Completed and cancelled jobs are removed from this list. Use **×** to interrupt the running job or cancel a waiting job.
+The current expanded view shows **Generating · Remaining: 4**: **one running job and three waiting jobs**. The four rows match the remaining count. Completed and cancelled jobs are removed from this list. The running row now has a green background with white text; the screenshot was taken before that color update. Use **×** to interrupt the running job or cancel a waiting job.
 
 1. Set the prompt and generation inputs, then click **Generate**.
 2. While it runs, prepare the next inputs and click **Generate** again. Confirm the inputs have reached WebUI and the remaining count increases.

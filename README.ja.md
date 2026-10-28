@@ -6,11 +6,35 @@ v0.1.0。Forge Neoの **txt2img** で、既存のGenerateを押すたびに生�
 
 ## インストール
 
+次のどちらかで導入できます。**Install from URLは、Available一覧への登録がなくても使えます。** 二重に導入しないでください。
+
+### Install from URL
+
 1. Forge Neoの **Extensions → Install from URL** を開きます。
-2. `https://github.com/ukr8b3g-cmyk/Forge-Neo-Generation-Queue` を入力して **Install** を押します。
+2. `https://github.com/ukr8b3g-cmyk/Forge-Neo-Generation-Queue.git` を入力して **Install** を押します。
 3. 通常のランチャーでForge Neoを再起動し、ブラウザーを再読み込みします。
 
-追加Pythonパッケージは不要です。手動配置の場合は `extensions/Forge-Neo-Generation-Queue` に入れます。導入済みなら二重に配置しないでください。
+### Git clone
+
+Gitが必要です。**Forge Neoのインストールフォルダー**でターミナルを開き、実行します。
+
+```sh
+git clone https://github.com/ukr8b3g-cmyk/Forge-Neo-Generation-Queue.git extensions/Forge-Neo-Generation-Queue
+```
+
+通常のランチャーでForge Neoを再起動し、ブラウザーを再読み込みします。追加Pythonパッケージは不要です。導入済みの場合は二重にcloneしないでください。
+
+## 更新
+
+キューの完了を待ってForge Neoを終了し、**Forge Neoのインストールフォルダー**で実行します。
+
+```sh
+git -C extensions/Forge-Neo-Generation-Queue pull --ff-only
+```
+
+更新後、Forge Neoを起動してブラウザーを再読み込みします。ローカル変更や履歴の分岐でGitが停止した場合は、その変更を保護してから解決してください。強制リセットは不要です。
+
+この更新方法はGitでcloneした配置が対象です。ZIPや手動コピーで`.git`がない場合、`git pull`は使えません。既存の拡張フォルダーを`extensions`の外へバックアップしてから、上記のインストールコマンドでcloneしてください。有効な配置は1つにします。
 
 表示言語はWebUIの`localization`設定に従います。日本語（`ja`／`ja_JP`等）なら日本語、英語・未設定・`None`・その他のロケールなら英語です。OSやブラウザーの言語は参照しません。英語UIの設定場所は **Settings → Generation Queue → Enable generation queue (txt2img)** です。言語変更後の設定見出し・チェックボックスはWebUIの再読み込みで更新します。
 
@@ -24,7 +48,7 @@ v0.1.0。Forge Neoの **txt2img** で、既存のGenerateを押すたびに生�
 
 ![生成中のキュー詳細：生成中1件と待機3件](docs/images/queue-details.png)
 
-現在の詳細表示例です。**Generating · Remaining: 4** は、**生成中1件＋待機3件＝残り4件**を表します。一覧も4行で、完了・取消済みの履歴は表示しません。各行の **×** で、生成中のジョブを中断、または待機中のジョブを取り消せます。
+現在の詳細表示例です。**Generating · Remaining: 4** は、**生成中1件＋待機3件＝残り4件**を表します。一覧も4行で、完了・取消済みの履歴は表示しません。最新版では生成中の行も緑背景・白文字になります（画像は行の色変更前）。各行の **×** で、生成中のジョブを中断、または待機中のジョブを取り消せます。
 
 詳細ポップアップの背景は暗い色で **不透明度80％（透明度20％）**。下の操作画面が薄く見える程度にしています。
 

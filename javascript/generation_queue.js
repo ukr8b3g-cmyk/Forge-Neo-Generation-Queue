@@ -77,7 +77,7 @@
         list.className = "fq-list";
         for (const row of active) {
             const line = document.createElement("div");
-            line.className = "fq-row";
+            line.className = row.state === "running" ? "fq-row fq-running" : "fq-row";
             const label = document.createElement("span");
             label.textContent = `${row.cancelling ? t("Interrupt requested", "中断要求中") : labels[row.state] ? t(...labels[row.state]) : row.state} #${row.number}  ${row.label}`;
             label.title = row.error || row.label;
