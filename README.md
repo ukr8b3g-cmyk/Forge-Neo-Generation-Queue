@@ -43,6 +43,8 @@ git -C extensions/Forge-Neo-Generation-Queue pull --ff-only
 
 Restart Forge Neo and reload the browser. If Git reports local changes or diverging history, preserve those changes and resolve them before updating; do not force a reset.
 
+If colors, spacing, or labels still look old, restart Forge Neo after the queue is empty, then use **Ctrl+F5** to reload without the browser cache. An ordinary page refresh can retain older CSS or JavaScript. Reloading only the browser does not apply Python changes.
+
 These commands require a Git clone. A ZIP or manually copied installation without a `.git` directory cannot use `git pull`. Move that copy outside `extensions` as a backup, then use the installation command above. Keep only one enabled copy.
 
 ## Enable the queue
@@ -70,7 +72,7 @@ The screenshot shows the exact option to add. Other entries, such as Clip Skip, 
 | --- | --- |
 | ![Idle Generate button and empty queue](docs/images/queue-idle.png) | ![Green Generate button with four remaining jobs](docs/images/queue-running.png) |
 
-The orange button is idle. Green means a job is running. **Remaining** includes the running job: three accepted clicks mean three jobs until one finishes or is cancelled.
+The orange button is idle. **Connecting… / Sending…** use a blue button while no job is running; green means the server reports a running job. **Remaining** includes the running job: three accepted clicks mean three jobs until one finishes or is cancelled.
 
 **Sending…** is brief local feedback, not confirmation that a job has been accepted. It is cleared when a newer server job appears or after five seconds; the remaining count always comes from accepted jobs. The client makes one early status check after submission. During startup, **Connecting…** identifies the handshake wait. If the connection times out, check Forge's log and try Generate again. Actual model loading and GPU generation can still take time.
 
