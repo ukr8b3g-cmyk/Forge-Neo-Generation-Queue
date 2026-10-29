@@ -1,5 +1,12 @@
 # Changelog / 変更履歴
 
+## 2026-10-29 — Running-row progress / 生成中行の進捗表示
+
+- Extend a blue progress fill from left to right behind the running row, using Forge's existing progress callback without additional polling. Preserve readable text and row cancellation controls, reset per job, and ignore late replies from earlier jobs.
+- Add client and isolated-browser progress regressions and explain the approximate progress in both READMEs.
+
+日本語：生成中の行に、進捗に合わせて左から右へ伸びる青い背景を追加。既存の進捗通知を再利用し、ジョブ切替でリセット、古い通知は無視。文字・取消操作・行の高さを維持し、日英説明と回帰テストを追加。
+
 ## 2026-10-29 — UI feedback and atomic completion / 表示・完了処理の改善
 
 - Show immediate Sending feedback and a blue button before generation, with one early status check. Preserve startup clicks while waiting up to 10 seconds for the initial connection; report timeouts without retrying automatically.

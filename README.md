@@ -80,6 +80,8 @@ The orange button is idle. **Connecting… / Sending…** use a blue button whil
 
 The expanded view shows **Generating · Remaining: 5**: **one running job and four waiting jobs**. The five rows match the remaining count. Completed and cancelled jobs are removed from this list. The running row has a **dark navy background, soft white text, and a blue line on the left**. Generate remains green. Hovering an enabled **×** turns it **red with white text**. In this capture, its tooltip explains that clicking it interrupts the current generation and continues with the next job.
 
+A **blue progress fill extends from left to right** behind the running row's text, using Forge's existing progress notifications without additional polling. It resets for each job and disappears with the completed row. This is Forge's approximate generation progress, not elapsed time; model loading and image saving may not advance it. The screenshot above predates the progress fill. No percentage label or extra row is added.
+
 The expanded queue screenshot was provided by the user from WebUI. The two idle/generating examples above it were rendered from the extension's current JavaScript and CSS with sample jobs in an isolated browser.
 
 1. Set the prompt and generation inputs, then click **Generate**.

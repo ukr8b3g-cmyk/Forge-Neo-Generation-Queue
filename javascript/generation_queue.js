@@ -16,6 +16,7 @@
     let ack = 0;
     let inFlight = 0;
     let monitored = null;
+    let progressValue = null;
     let lastView = "";
     let error = "";
     let sendingUntil = 0;
@@ -32,6 +33,13 @@
     function command(value) {
         commands.push({command: value, command_id: uuid()});
         tick();
+    }
+    function paintProgress() {
+        const bar = el("fq_content")?.querySelector(".fq-progress");
+        if (!bar || bar.dataset.taskId !== monitored) return;
+        bar.style.width = `${(progressValue ?? 0) * 100}%`;
+        if (progressValue === null) bar.removeAttribute("aria-valuenow");
+        else bar.setAttribute("aria-valuenow", Math.round(progressValue * 100));
     }
     function paint() {
         const panel = el("forge_generation_queue_panel");
@@ -92,6 +100,16 @@
         for (const row of active) {
             const line = document.createElement("div");
             line.className = row.state === "running" ? "fq-row fq-running" : "fq-row";
+            if (row.state === "running") {
+                const bar = document.createElement("div");
+                bar.className = "fq-progress";
+                bar.dataset.taskId = row.id;
+                bar.setAttribute("role", "progressbar");
+                bar.setAttribute("aria-label", t("Generation progress", "生成の進捗"));
+                bar.setAttribute("aria-valuemin", "0");
+                bar.setAttribute("aria-valuemax", "100");
+                line.append(bar);
+            }
             const label = document.createElement("span");
             label.textContent = `${row.cancelling ? t("Interrupt requested", "中断要求中") : labels[row.state] ? t(...labels[row.state]) : row.state} #${row.number}  ${row.label}`;
             label.title = row.error || row.label;
@@ -109,6 +127,7 @@
             list.append(line);
         }
         details.append(list);
+        paintProgress();
     }
     function stopRepeat() {
         // Native Generate forever tests Interrupt visibility. It cannot share queue mode.
@@ -185,9 +204,18 @@
             if (commands[0] && state.command_id === commands[0].command_id) commands.shift();
             ack = state.result_seq || ack;
             const running = (state.rows || []).find(row => row.state === "running");
-            if (running && running.id !== monitored) {
-                monitored = running.id;
-                requestProgress(running.id, el("txt2img_gallery_container"), el("txt2img_gallery"), () => {});
+            const taskId = running?.id || null;
+            if (taskId !== monitored) {
+                monitored = taskId;
+                progressValue = null;
+                if (taskId) {
+                    // Reuse the native monitor; late replies must not update the next job.
+                    requestProgress(taskId, el("txt2img_gallery_container"), el("txt2img_gallery"), () => {}, res => {
+                        if (taskId !== monitored || !res.active || !Number.isFinite(res.progress)) return;
+                        progressValue = Math.max(0, Math.min(1, res.progress));
+                        paintProgress();
+                    });
+                }
             }
             paint();
         },
