@@ -38,7 +38,12 @@
         tick();
     }
     function paintProgress() {
-        const bar = el("fq_content")?.querySelector(".fq-progress");
+        const content = el("fq_content");
+        const heading = content?.querySelector(".fq-heading-running");
+        if (heading?.dataset.taskId === monitored) {
+            heading.style.setProperty("--fq-heading-progress", `${(progressValue ?? 0) * 100}%`);
+        }
+        const bar = content?.querySelector(".fq-progress");
         if (!bar || bar.dataset.taskId !== monitored) return;
         bar.style.width = `${(progressValue ?? 0) * 100}%`;
         if (progressValue === null) bar.removeAttribute("aria-valuenow");
@@ -78,6 +83,10 @@
         details.open = expanded;
         const heading = document.createElement("summary");
         heading.className = "fq-heading";
+        if (running && !state.paused) {
+            heading.classList.add("fq-heading-running");
+            heading.dataset.taskId = running.id;
+        }
         const status = state.paused ? t("Paused", "停止中") : running ?
             running.cancelling ? t("Interrupting", "中断中") : t("Generating", "生成中") :
             sending ? t("Sending…", "送信中…") : loadingOptions ? t("Loading settings…", "設定読込中…") :

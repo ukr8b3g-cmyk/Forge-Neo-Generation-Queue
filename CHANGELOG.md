@@ -1,5 +1,11 @@
 # Changelog / 変更履歴
 
+## 2026-10-29 — Heading progress / 見出しの進捗表示
+
+- Fill the compact Generating / Remaining heading from left to right with the current job's progress, including when details are closed. Reuse the existing native progress callback, preserve 22px height, text and disclosure controls, reset per job, and hide the fill while paused or idle.
+
+日本語：Generating／Remainingの見出しにも現在生成中の1件の進捗を青い背景で表示。詳細を閉じた状態でも確認でき、高さ22px・文字・開閉操作を維持。既存の進捗通知を共有し、ジョブ切替でリセット、停止中・待機時は進捗色を表示しない。
+
 ## 2026-10-29 — Faster startup and clearer queue controls / 起動時受付・キュー操作の改善
 
 - Submit through the existing Generate event as soon as WebUI settings are known, without waiting for the initial queue-status reply. Start the single status handler from Gradio's page-load event, preserve one submission per click, and retain post-submission polling and final-result acknowledgement after OFF. Report stalled status requests without overlapping requests or automatic replay.

@@ -7,7 +7,7 @@ Queue **txt2img** jobs with Forge Neo's existing **Generate** button. Prepare th
 - One click adds one job; jobs run sequentially through Forge's existing pipeline.
 - Generate turns **dark green during generation**, then returns to its normal color.
 - A queue submission immediately shows **Sending…** (blue while no job is running). Once WebUI settings are available, Generate submits without waiting for the first queue-status reply. Each click submits once; generation submissions are never automatically resent.
-- A single line shows **Generating · Remaining: N**, including the current job and all waiting jobs. Details show only these unfinished jobs; completed and cancelled jobs disappear.
+- A single line shows **Generating · Remaining: N**, including the current job and all waiting jobs. Its blue background fills from left to right with the current job's progress, even while details are closed. Details show only these unfinished jobs; completed and cancelled jobs disappear.
 - When all jobs finish or are cancelled, the count and details disappear automatically. They return when another job is accepted. Errors and pause/resume notices remain available.
 - Click the count to view details and cancel individual jobs. The popup does not push the page down.
 - Optional Quicksettings toggle. **OFF by default.**
@@ -82,7 +82,7 @@ If WebUI settings themselves are still loading, the click keeps its captured inp
 
 The expanded view shows **Generating · Remaining: 5**: **one running job and four waiting jobs**. The five rows match the remaining count. Completed and cancelled jobs are removed from this list. The running row has a **dark navy background, soft white text, and a blue line on the left**. Generate remains green. Hovering an enabled **×** turns it **red with white text**. In this capture, its tooltip explains that clicking it interrupts the current generation and continues with the next job.
 
-A **blue progress fill extends from left to right** behind the running row's text, using Forge's existing progress notifications without additional polling. It resets for each job and disappears with the completed row. This is Forge's approximate generation progress, not elapsed time; model loading and image saving may not advance it. The screenshot above predates the progress fill. No percentage label or extra row is added.
+The **Generating · Remaining** heading and the running row both have a **blue fill that grows from left to right with progress**. The heading shows it even while details are closed, retains its compact 22px height, and still opens details when clicked. Both displays share Forge's existing progress notifications without additional polling and reset for each job. The fill shows the current job's approximate progress; Remaining is the number of unfinished jobs. It is not a percentage of the entire queue or of elapsed time, and may stay still during model loading or image saving. The screenshot above predates the progress fill. No percentage label or extra row is added.
 
 The expanded queue screenshot was provided by the user from WebUI. The two idle/generating examples above it were rendered from the extension's current JavaScript and CSS with sample jobs in an isolated browser.
 

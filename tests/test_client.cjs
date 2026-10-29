@@ -208,12 +208,16 @@ test('OFF sends the final acknowledgement then stops idle polling', () => {
     assert.equal(c.polls(), before + 1);
 });
 
-test('native progress updates the current job without another monitor or poll', () => {
+test('native progress updates the heading and current row without another monitor or poll', () => {
     const attrs = new Map();
     const bar = {dataset: {taskId: 'a'}, style: {},
         setAttribute: (name, value) => attrs.set(name, String(value)),
         removeAttribute: name => attrs.delete(name)};
-    const c = client({nodes: {fq_content: {querySelector: () => bar}}});
+    let headingWidth;
+    const heading = {dataset: {taskId: 'a'}, style: {
+        setProperty: (name, value) => { assert.equal(name, '--fq-heading-progress'); headingWidth = value; }
+    }};
+    const c = client({nodes: {fq_content: {querySelector: selector => selector === '.fq-heading-running' ? heading : bar}}});
     const monitors = [];
     c.context.requestProgress = (id, container, gallery, atEnd, onProgress) => monitors.push({id, onProgress});
     const update = id => c.api.receive(JSON.stringify({ready: true, busy: true,
@@ -225,23 +229,31 @@ test('native progress updates the current job without another monitor or poll', 
     const progress = monitors[0].onProgress;
     progress({active: true, progress: 0.4});
     assert.equal(bar.style.width, '40%');
+    assert.equal(headingWidth, '40%');
     assert.equal(attrs.get('aria-valuenow'), '40');
     for (const value of [null, undefined, NaN, Infinity, '0.8']) progress({active: true, progress: value});
     progress({active: false, progress: 0.9});
     assert.equal(bar.style.width, '40%');
+    assert.equal(headingWidth, '40%');
     progress({active: true, progress: 2});
     assert.equal(bar.style.width, '100%');
+    assert.equal(headingWidth, '100%');
     progress({active: true, progress: -1});
     assert.equal(bar.style.width, '0%');
+    assert.equal(headingWidth, '0%');
     assert.equal(c.polls(), polls);
 
     bar.dataset.taskId = 'b';
+    heading.dataset.taskId = 'b';
     update('b');
     progress({active: true, progress: 0.9});
     assert.equal(bar.style.width, '0%');
+    assert.equal(headingWidth, '0%');
     monitors[1].onProgress({active: true, progress: 0.25});
     assert.equal(bar.style.width, '25%');
+    assert.equal(headingWidth, '25%');
     c.api.receive(JSON.stringify({ready: true, busy: false, rows: []}));
     monitors[1].onProgress({active: true, progress: 1});
     assert.equal(bar.style.width, '25%');
+    assert.equal(headingWidth, '25%');
 });
