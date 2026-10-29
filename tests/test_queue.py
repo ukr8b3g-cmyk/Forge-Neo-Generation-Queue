@@ -2,7 +2,7 @@ import sys
 import time
 import unittest
 from pathlib import Path
-from threading import Event
+from threading import Event, current_thread
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -268,6 +268,94 @@ class QueueTests(unittest.TestCase):
         q.enqueue("b", "A", ["B"], None, "fp")
         until(lambda: not q.has_work())
         self.assertEqual(q.snapshot("A", first["result_seq"])[1], ("b",))
+
+    def completion_boundary(self, queue, job_id):
+        """Pause the worker after its first lock release publishing a terminal job.
+
+        Only scheduling is controlled; the production state and methods are intact.
+        A competing poll/enqueue can now inspect that externally visible boundary.
+        """
+        arrived, release = Event(), Event()
+        condition = queue.cv
+
+        class Boundary:
+            stopped = False
+
+            def __getattr__(self, name):
+                return getattr(condition, name)
+
+            def __enter__(self):
+                return condition.__enter__()
+
+            def __exit__(self, *args):
+                job = queue.jobs.get(job_id)
+                stop = (not self.stopped and current_thread() is queue.worker and
+                        job is not None and job.state in ("done", "cancelled", "failed"))
+                if stop:
+                    self.stopped = True
+                result = condition.__exit__(*args)
+                if stop:
+                    arrived.set()
+                    release.wait(5)
+                return result
+
+        queue.cv = Boundary()
+        self.addCleanup(release.set)
+        return arrived, release
+
+    def test_completion_publishes_result_and_cleanup_before_idle_snapshot(self):
+        for interrupted in (False, True):
+            with self.subTest(interrupted=interrupted):
+                def execute(job, queue):
+                    queue.claim(job, lambda: None)
+                    if interrupted:
+                        queue.cancel("owner", job.id)
+                    return ({"value": "final image"},)
+
+                q = self.make(execute)
+                arrived, release = self.completion_boundary(q, "last-job")
+                q.enqueue("last-job", "owner", ["prompt"], object(), "fp")
+                try:
+                    self.assertTrue(arrived.wait(3), "completion boundary not reached")
+                    state, result = q.snapshot("owner")
+                    self.assertFalse(state["busy"])
+                    self.assertEqual(state["rows"][0]["state"], "cancelled" if interrupted else "done")
+                    self.assertGreater(state["result_seq"], 0)
+                    self.assertEqual(result, ({"value": "final image"},))
+                    self.assertEqual(q.jobs["last-job"].args, ())
+                    self.assertIsNone(q.jobs["last-job"].context)
+                    # Even an OFF client sees pending delivery and will poll to ACK.
+                    self.assertIsNone(q.snapshot("owner", state["result_seq"])[1])
+                finally:
+                    release.set()
+                    q.close()
+                    q.worker.join(3)
+                self.assertFalse(q.worker.is_alive())
+
+    def test_completion_keeps_the_32nd_client_slot_reserved(self):
+        def execute(job, queue):
+            queue.claim(job, lambda: None)
+            return (job.owner,)
+
+        q = self.make(execute)
+        arrived, release = self.completion_boundary(q, "last-job")
+        for n in range(31):
+            q.enqueue("prefill-" + str(n), n, ["prompt"], None, "fp")
+        with q.cv:
+            self.assertTrue(q.cv.wait_for(lambda: len(q.latest) == 31, timeout=3))
+        q.enqueue("last-job", "last-owner", ["prompt"], None, "fp")
+        try:
+            self.assertTrue(arrived.wait(3), "completion boundary not reached")
+            self.assertFalse(q.has_work())
+            with self.assertRaisesRegex(ValueError, "pending results"):
+                q.enqueue("extra", "33rd-owner", ["prompt"], None, "fp")
+            self.assertEqual(len(q.latest), 32)
+            self.assertEqual(q.snapshot("last-owner")[1], ("last-owner",))
+        finally:
+            release.set()
+            q.close()
+            q.worker.join(3)
+        self.assertFalse(q.worker.is_alive())
 
 
 if __name__ == "__main__":

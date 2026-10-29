@@ -6,7 +6,9 @@ Queue **txt2img** jobs with Forge Neo's existing **Generate** button. Prepare th
 
 - One click adds one job; jobs run sequentially through Forge's existing pipeline.
 - Generate turns **dark green during generation**, then returns to its normal color.
+- A queue submission immediately shows **Sending…** (blue while no job is running). Startup clicks wait up to 10 seconds for the initial connection with their captured inputs, then submit once. A timeout reports a connection error without automatic retry.
 - A single line shows **Generating · Remaining: N**, including the current job and all waiting jobs. Details show only these unfinished jobs; completed and cancelled jobs disappear.
+- When all jobs finish or are cancelled, the count and details disappear automatically. They return when another job is accepted. Errors and pause/resume notices remain available.
 - Click the count to view details and cancel individual jobs. The popup does not push the page down.
 - Optional Quicksettings toggle. **OFF by default.**
 - Japanese for Japanese WebUI locales; English for English, unset/`None`, and other locales. Browser/OS language is not used.
@@ -66,13 +68,17 @@ The screenshot shows the exact option to add. Other entries, such as Clip Skip, 
 
 | Idle | Generating |
 | --- | --- |
-| ![Idle Generate button and empty queue](docs/images/queue-idle.png) | ![Green Generate button and three pending jobs](docs/images/queue-running.png) |
+| ![Idle Generate button and empty queue](docs/images/queue-idle.png) | ![Green Generate button with four remaining jobs](docs/images/queue-running.png) |
 
-The orange button is idle. Green means a job is running. These user-supplied captures show the earlier **Queued** label, which counted waiting jobs only. The current **Remaining** count includes the running job: three accepted clicks mean three jobs until one finishes or is cancelled. The latest styling also reduces the gap below Generate.
+The orange button is idle. Green means a job is running. **Remaining** includes the running job: three accepted clicks mean three jobs until one finishes or is cancelled.
 
-![Expanded queue during generation: one running job and three waiting jobs](docs/images/queue-details.png)
+**Sending…** is brief local feedback, not confirmation that a job has been accepted. It is cleared when a newer server job appears or after five seconds; the remaining count always comes from accepted jobs. The client makes one early status check after submission. During startup, **Connecting…** identifies the handshake wait. If the connection times out, check Forge's log and try Generate again. Actual model loading and GPU generation can still take time.
 
-The current expanded view shows **Generating · Remaining: 4**: **one running job and three waiting jobs**. The four rows match the remaining count. Completed and cancelled jobs are removed from this list. The running row now has a green background with white text; the screenshot was taken before that color update. Use **×** to interrupt the running job or cancel a waiting job.
+![Five remaining jobs, with the running job's interrupt button highlighted red on hover](docs/images/queue-details.png)
+
+The expanded view shows **Generating · Remaining: 5**: **one running job and four waiting jobs**. The five rows match the remaining count. Completed and cancelled jobs are removed from this list. The running row has a **dark navy background, soft white text, and a blue line on the left**. Generate remains green. Hovering an enabled **×** turns it **red with white text**. In this capture, its tooltip explains that clicking it interrupts the current generation and continues with the next job.
+
+The expanded queue screenshot was provided by the user from WebUI. The two idle/generating examples above it were rendered from the extension's current JavaScript and CSS with sample jobs in an isolated browser.
 
 1. Set the prompt and generation inputs, then click **Generate**.
 2. While it runs, prepare the next inputs and click **Generate** again. Confirm the inputs have reached WebUI and the remaining count increases.
@@ -80,7 +86,18 @@ The current expanded view shows **Generating · Remaining: 4**: **one running jo
 4. Click the count for details. **×** on a pending job cancels that job. **×** on the running job requests interruption; the next job starts after interruption finishes.
 5. If generation fails, remaining jobs pause. Check the problem and click **Resume**. The failed job is not retried automatically.
 
-The details popup uses a dark background at **80% opacity (20% transparency)** so the underlying controls show through only faintly.
+### Cancel or interrupt with ×
+
+**Queue mode uses the × in each detail row for cancellation and interruption; there is no separate Cancel button.**
+
+1. Click **Remaining: N** below Generate to open the details.
+2. Find the job you want to stop.
+3. Click its **×**: on **Pending / Waiting to start**, it removes that reservation; on **Generating**, it requests interruption of the current generation.
+4. Interruption waits for Forge's next interruptible point. Other accepted jobs remain queued and continue afterward. To stop those too, cancel their rows individually.
+
+Turning the queue **OFF does not cancel accepted jobs**. Use the row buttons to stop them.
+
+The details popup has a dark background at **100% opacity (no transparency)**. Underlying controls do not show through.
 
 The limit is **32 running and pending jobs combined**, across the instance. Turning the queue **OFF** stops new queue submissions and lets accepted jobs finish. The count and cancellation controls remain available until it drains.
 
@@ -100,7 +117,7 @@ The limit is **32 running and pending jobs combined**, across the instance. Turn
 
 Version **0.1.0** was developed against Forge Neo commit `2900d5948a17ec993075fb810a695ce4f674bd0c`, Gradio **4.40.0**. Other versions have not been verified. If the txt2img event contract differs, the extension logs a warning and leaves the native Generate event unchanged.
 
-Forge's source files are not edited. Its existing txt2img generation pipeline and GPU lock are used. Automated checks cover ordering, cancellation, input copies, locale selection, Gradio integration, and compact UI behavior. Isolated browser generation uses a CPU simulation and **does not establish real Forge/GPU acceptance**. Screenshots are cropped user-supplied WebUI captures. See [testing notes](TESTING.md).
+Forge's source files are not edited. Its existing txt2img generation pipeline and GPU lock are used. Automated checks cover ordering, cancellation, input copies, locale selection, Gradio integration, and compact UI behavior. Isolated browser generation uses a CPU simulation and **does not establish real Forge/GPU acceptance**. Settings and expanded queue screenshots are user-supplied WebUI captures; the idle/generating examples use sample jobs. See [testing notes](TESTING.md).
 
 ## Disable
 

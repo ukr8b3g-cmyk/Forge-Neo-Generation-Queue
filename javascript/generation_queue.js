@@ -18,6 +18,9 @@
     let monitored = null;
     let lastView = "";
     let error = "";
+    let sendingUntil = 0;
+    let sendingAfter = 0;
+    const connectionWaiters = new Set();
     const commands = [];
     const el = id => gradioApp().getElementById(id);
     const enabled = () => !!opts.forge_generation_queue_enabled;
@@ -38,27 +41,34 @@
         // Server history is retained for result delivery and diagnostics, not queue rows.
         const active = (state.rows || []).filter(row => ["pending", "waiting", "running"].includes(row.state));
         const ownBusy = active.length > 0;
+        const sending = Date.now() < sendingUntil;
         const mode = state.ready && (enabled() || ownBusy);
         box.classList.toggle("fq-mode", mode);
         const running = active.find(row => row.state === "running");
         const newest = (state.rows || []).reduce((last, row) => !last || row.number > last.number ? row : last, null);
         const latestFailure = newest?.state === "failed" ? newest.error : "";
         box.classList.toggle("fq-generating", !!running);
-        panel.style.setProperty("display", enabled() || ownBusy || state.can_resume || error || latestFailure ? "flex" : "none", "important");
+        const connecting = !state.ready && (enabled() || connectionWaiters.size > 0);
+        box.classList.toggle("fq-submitting", !running && (sending || connecting));
+        el("txt2img_generate")?.setAttribute("aria-busy", running || sending || connecting ? "true" : "false");
+        const visible = ownBusy || sending || state.paused || state.can_resume || error || latestFailure || connecting;
+        panel.style.setProperty("display", visible ? "flex" : "none", "important");
         const content = el("fq_content");
-        const view = JSON.stringify([state.rows, state.paused, state.can_resume, state.ready, enabled(), error, japanese()]);
+        const view = JSON.stringify([state.rows, state.paused, state.can_resume, state.ready, enabled(), error, japanese(), sending, connecting]);
         if (!content || lastView === view) return;
         lastView = view;
-        const expanded = content.querySelector("details")?.open || false;
+        const expanded = ownBusy && (content.querySelector("details")?.open || false);
         content.replaceChildren();
+        if (!visible) return;
         const details = document.createElement("details");
         details.open = expanded;
         const heading = document.createElement("summary");
         heading.className = "fq-heading";
-        const status = !state.ready ? t("Connecting…", "接続中…") :
+        const status = connecting ? t("Connecting…", "接続中…") :
             state.paused ? t("Paused", "停止中") : running ?
-                running.cancelling ? t("Interrupting", "中断中") : t("Generating", "生成中") : "";
-        heading.textContent = `${status ? status + " · " : ""}${t(`Remaining: ${active.length}`, `残り ${active.length}件`)}`;
+                running.cancelling ? t("Interrupting", "中断中") : t("Generating", "生成中") : sending ? t("Sending…", "送信中…") : "";
+        heading.textContent = [status, ownBusy ? t(`Remaining: ${active.length}`, `残り ${active.length}件`) : "",
+            ownBusy && sending && running ? t("Sending…", "送信中…") : ""].filter(Boolean).join(" · ");
         heading.title = t("Click to view or cancel individual jobs", "クリックで予約の詳細・個別取消");
         details.append(heading);
         content.append(details);
@@ -107,6 +117,35 @@
             regen_txt2img = null;
         }
     }
+    function waitForConnection() {
+        return new Promise((resolve, reject) => {
+            const waiter = {resolve, timer: null};
+            waiter.timer = setTimeout(() => {
+                connectionWaiters.delete(waiter);
+                error = t("Queue connection timed out. Check the Forge log, then try Generate again.", "キューへの接続がタイムアウトしました。Forgeのログを確認し、再度Generateを押してください。");
+                paint();
+                reject(new Error(error));
+            }, 10000);
+            connectionWaiters.add(waiter);
+            tick();
+        });
+    }
+    function send(values) {
+        if (!enabled()) {
+            error = t("The queue was switched OFF before submission. Click Generate again to use normal generation.", "送信前にキューがOFFになりました。通常生成する場合はGenerateを押し直してください。");
+            paint();
+            throw new Error(error);
+        }
+        if (error) throw new Error(error);
+        values[0] = `fq:${token}:${uuid()}`;
+        // Immediate feedback is not an accepted job and never changes the count.
+        sendingAfter = Math.max(0, ...(state.rows || []).map(row => row.number));
+        sendingUntil = Date.now() + 5000;
+        paint();
+        // One early status check; keep the normal idle polling interval unchanged.
+        setTimeout(tick, 100);
+        return values;
+    }
     function tick() {
         paint();
         if (enabled()) stopRepeat();
@@ -123,10 +162,10 @@
         submit(...args) {
             if (!enabled() && !state.busy) return submit(...args);
             stopRepeat();
-            if (!state.ready || error) throw new Error(t("Generation queue is not connected. Reload the page.", "生成キューに接続できていません。ページを再読み込みしてください。"));
+            // Capture the click's inputs before waiting for the initial handshake.
             const values = create_submit_args(args);
-            values[0] = `fq:${token}:${uuid()}`;
-            return values;
+            if (!state.ready) return waitForConnection().then(() => send(values));
+            return send(values);
         },
         pollArgs() {
             return JSON.stringify({token, ack, poll_id: uuid(), ...(commands[0] || {})});
@@ -135,6 +174,14 @@
             inFlight = 0;
             try { state = JSON.parse(value); } catch (_) { return; }
             error = state.message || "";
+            if ((state.rows || []).some(row => row.number > sendingAfter)) sendingUntil = 0;
+            if (state.ready) {
+                for (const waiter of connectionWaiters) {
+                    clearTimeout(waiter.timer);
+                    waiter.resolve();
+                }
+                connectionWaiters.clear();
+            }
             if (commands[0] && state.command_id === commands[0].command_id) commands.shift();
             ack = state.result_seq || ack;
             const running = (state.rows || []).find(row => row.state === "running");

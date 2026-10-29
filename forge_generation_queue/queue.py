@@ -170,6 +170,7 @@ class GenerationQueue:
                         break
                     self.cv.wait()
             result = None
+            failure = None
             try:
                 result = self.execute(job, self)
             except HoldQueue as exc:
@@ -180,21 +181,19 @@ class GenerationQueue:
                         self.paused_owner = job.owner
                 continue
             except Exception as exc:
-                with self.cv:
+                failure = str(exc)[:500]
+            # Publish terminal state, result, freed inputs and client accounting
+            # together. OFF clients may stop polling as soon as busy becomes false.
+            with self.cv:
+                if failure is not None:
                     job.state = "failed"
-                    job.error = str(exc)[:500]
+                    job.error = failure
                     self.paused = "Generation failed. Check the settings and resume."
                     self.paused_owner = job.owner
-            else:
-                with self.cv:
-                    if job.state != "cancelled":
-                        job.state = "cancelled" if job.cancel_requested else "done"
-            finally:
-                with self.cv:
-                    if job.state not in ("pending", "waiting", "running"):
-                        job.args = ()
-                        job.context = None
-            with self.cv:
+                elif job.state != "cancelled":
+                    job.state = "cancelled" if job.cancel_requested else "done"
+                job.args = ()
+                job.context = None
                 if result is not None:
                     self.latest[job.owner] = (job.number, result, monotonic() + RESULT_TTL)
                     self.latest.move_to_end(job.owner)

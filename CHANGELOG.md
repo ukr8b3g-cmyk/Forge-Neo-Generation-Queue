@@ -1,5 +1,19 @@
 # Changelog / 変更履歴
 
+## 2026-10-29 — UI feedback and atomic completion / 表示・完了処理の改善
+
+- Show immediate Sending feedback and a blue button before generation, with one early status check. Preserve startup clicks while waiting up to 10 seconds for the initial connection; report timeouts without retrying automatically.
+- Hide the count and expanded details when no jobs remain, preserving errors and final-result acknowledgement. New jobs reappear with details collapsed.
+- Publish terminal job state, result delivery, input cleanup, and client-slot accounting in one queue lock operation. Add deterministic completion-boundary regressions for idle polling and the 32-client limit.
+- Make queue details fully opaque so underlying controls no longer show through.
+- Use a navy running row with soft white text and a blue left border, distinct from the green Generate button.
+- Turn enabled row × buttons red with white text on hover. Keep the startup Connecting/Sending gap below Generate at 2px.
+- Explain the row × buttons for pending cancellation and running interruption in both READMEs. Refresh the idle/generating examples and replace the expanded view with the user-provided five-job screenshot showing the red hover and interrupt tooltip.
+
+日本語：詳細背景を不透明度100％へ変更。生成中行は濃いネイビー＋白文字＋青ライン、×は赤ホバー。起動時もGenerate下の間隔を2pxに統一。全完了時は件数と空詳細を非表示にし、送信直後の反応と起動時の接続待ちを改善。取消・中断を日英で説明し、待機／生成中の例とユーザー提供の赤ホバー詳細画像を掲載。
+
+完了状態と結果登録の間の競合も修正。完了・中断の最終結果通知と32操作元の枠維持を、スレッドの実行順を制御する回帰テストで確認。
+
 ## 2026-10-29 — Queue reliability fixes / キュー制御修正
 
 - Release a global pause when its owner has no unfinished work, retaining settings guards for subsequent jobs and visible failure details.

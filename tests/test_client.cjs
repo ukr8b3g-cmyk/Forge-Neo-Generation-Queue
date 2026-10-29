@@ -10,6 +10,8 @@ const source = fs.readFileSync(path.join(__dirname, '../javascript/generation_qu
 function client({stored = null, storageDenied = false} = {}) {
     let interval;
     let polls = 0;
+    let timerId = 0;
+    const timers = new Map();
     const context = {
         // Deliberately omit randomUUID, as on an HTTP LAN origin.
         crypto: {getRandomValues: values => webcrypto.getRandomValues(values)},
@@ -21,6 +23,8 @@ function client({stored = null, storageDenied = false} = {}) {
         gradioApp: () => ({getElementById: id => id === 'fq_poll' ? {click() { polls++; }} : null}),
         onUiLoaded() {}, onOptionsChanged() {},
         setInterval(fn) { interval = fn; }, clearInterval() {},
+        setTimeout(fn, delay) { timers.set(++timerId, {fn, delay}); return timerId; },
+        clearTimeout(id) { timers.delete(id); },
         create_submit_args: args => [...args],
         submit: (...args) => ['native', ...args], requestProgress() {},
     };
@@ -30,7 +34,8 @@ function client({stored = null, storageDenied = false} = {}) {
     vm.runInNewContext(source, context);
     context.loaded();
     return {context, api: context.forgeGenerationQueue, stored: () => stored,
-        tick: () => interval(), polls: () => polls};
+        tick: () => interval(), polls: () => polls,
+        runTimeouts: delay => { for (const [id, timer] of [...timers]) if (timer.delay === delay) { timers.delete(id); timer.fn(); } }};
 }
 
 test('HTTP origin initializes and creates distinct cryptographic IDs', () => {
@@ -63,8 +68,44 @@ test('OFF uses native submission when the queue is idle', () => {
     assert.deepEqual(Array.from(api.submit('task', 'prompt')), ['native', 'task', 'prompt']);
 });
 
-test('ON refuses submission until connected', () => {
-    assert.throws(() => client().api.submit('old'), /not connected/);
+test('startup submission waits for connection and preserves clicked inputs', async () => {
+    const c = client();
+    const args = ['old', 'original prompt'];
+    const submitted = c.api.submit(...args);
+    assert.equal(typeof submitted.then, 'function');
+    args[1] = 'later prompt';
+    c.api.receive(JSON.stringify({ready: true, rows: [], busy: false}));
+    const values = await submitted;
+    assert.match(values[0], /^fq:[a-f0-9]{32}:[a-f0-9]{32}$/);
+    assert.equal(values[1], 'original prompt');
+});
+
+test('startup timeout rejects without automatically resubmitting', async () => {
+    const c = client();
+    const submitted = c.api.submit('old', 'prompt');
+    const rejected = assert.rejects(submitted, /connection timed out/);
+    c.runTimeouts(10000);
+    await rejected;
+    c.api.receive(JSON.stringify({ready: true, rows: [], busy: false}));
+    c.runTimeouts(100);
+    assert.equal(c.polls(), 1); // Only the initial handshake, no delayed submission poll.
+});
+
+test('switching OFF during startup never silently starts native generation', async () => {
+    const c = client();
+    const submitted = c.api.submit('old', 'prompt');
+    c.context.opts.forge_generation_queue_enabled = false;
+    c.api.receive(JSON.stringify({ready: true, rows: [], busy: false}));
+    await assert.rejects(submitted, /switched OFF/);
+});
+
+test('ready submission schedules one early status check', () => {
+    const c = client();
+    c.api.receive(JSON.stringify({ready: true, rows: [], busy: false}));
+    const before = c.polls();
+    c.api.submit('old', 'prompt');
+    c.runTimeouts(100);
+    assert.equal(c.polls(), before + 1);
 });
 
 test('OFF sends the final acknowledgement then stops idle polling', () => {
