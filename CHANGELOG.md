@@ -1,5 +1,11 @@
 # Changelog / 変更履歴
 
+## 2026-10-29 — Deferred early status refresh / 送信後の再確認保留
+
+- Retain one send-triggered early status check when another request is in flight, then run it after processing the response. Coalesce repeated early checks without overlapping requests or speeding up regular 750ms polling. Preserve result acknowledgement after OFF and timeout behavior without generation retries.
+
+日本語：送信後の早期状態確認が通信中に重なった場合、要求を1件だけ保持して応答処理後に実行する。連続要求をまとめ、通常の750ms間隔と重複通信防止を維持。OFF後の最終受信確認とタイムアウト時の自動再送防止も保持する。
+
 ## 2026-10-29 — Heading progress / 見出しの進捗表示
 
 - Fill the compact Generating / Remaining heading from left to right with the current job's progress, including when details are closed. Reuse the existing native progress callback, preserve 22px height, text and disclosure controls, reset per job, and hide the fill while paused or idle.

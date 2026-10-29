@@ -10,6 +10,7 @@ const source = fs.readFileSync(path.join(__dirname, '../javascript/generation_qu
 function client({stored = null, storageDenied = false, nodes = {},
     options = {forge_generation_queue_enabled: true}, load = true} = {}) {
     let interval;
+    let intervalMs;
     let polls = 0;
     let timerId = 0;
     let clock = Date.now();
@@ -31,7 +32,7 @@ function client({stored = null, storageDenied = false, nodes = {},
         }} : null)}),
         onUiLoaded() {}, onOptionsChanged() {},
         onOptionsAvailable(fn) { optionsAvailable = fn; if (Object.keys(context.opts).length) fn(); },
-        setInterval(fn) { interval = fn; }, clearInterval() {},
+        setInterval(fn, delay) { interval = fn; intervalMs = delay; }, clearInterval() {},
         setTimeout(fn, delay) { timers.set(++timerId, {fn, delay}); return timerId; },
         clearTimeout(id) { timers.delete(id); },
         create_submit_args: args => [...args],
@@ -46,6 +47,7 @@ function client({stored = null, storageDenied = false, nodes = {},
     if (load) beginLoad();
     return {context, api: context.forgeGenerationQueue, stored: () => stored,
         tick: () => interval(), polls: () => polls,
+        intervalMs: () => intervalMs,
         beginLoad, lastRequest: () => requests.at(-1),
         advance: ms => { clock += ms; },
         loadOptions: value => { context.opts = value; optionsAvailable(); },
@@ -156,10 +158,10 @@ test('OFF while accepted jobs remain never falls back to native generation', () 
 test('stale empty status cannot stop polling after a startup submission and OFF', () => {
     const c = client();
     c.api.submit('old', 'prompt');
+    c.runTimeouts(100);
     c.context.opts.forge_generation_queue_enabled = false;
     c.api.receive(JSON.stringify({ready: true, enabled: false, rows: [], busy: false}));
-    c.tick();
-    assert.equal(c.polls(), 1, 'A status request after the click is still required');
+    assert.equal(c.polls(), 1, 'The deferred check must run immediately even after OFF');
     c.api.receive(JSON.stringify({ready: true, enabled: false, rows: [], busy: false, result_seq: 3}));
     c.tick();
     assert.equal(c.lastRequest().ack, 3);
@@ -193,6 +195,73 @@ test('ready submission schedules one early status check', () => {
     c.api.submit('old', 'prompt');
     c.runTimeouts(100);
     assert.equal(c.polls(), before + 1);
+});
+
+test('blocked early checks coalesce and run once after the current response', () => {
+    const c = client();
+    const sent = Array.from({length: 3}, () => c.api.submit('old', 'prompt')[0]);
+    c.runTimeouts(100);
+    c.tick();
+    c.tick();
+    assert.equal(c.polls(), 0, 'Do not overlap the initial load request');
+    c.api.receive(JSON.stringify({ready: true, rows: [], busy: false}));
+    assert.equal(c.polls(), 1, 'One follow-up must start without a periodic tick');
+    c.tick();
+    assert.equal(c.polls(), 1, 'The follow-up is still in flight');
+    c.api.receive(JSON.stringify({ready: true, rows: [], busy: false}));
+    assert.equal(c.polls(), 1, 'Do not keep polling at response speed');
+    assert.equal(new Set(sent).size, 3, 'Status refreshes never resubmit Generate');
+    assert.equal(c.intervalMs(), 750);
+});
+
+test('an early check after the current response sends only once at its scheduled time', () => {
+    const c = client();
+    c.api.submit('old', 'prompt');
+    c.api.receive(JSON.stringify({ready: true, rows: [], busy: false}));
+    assert.equal(c.polls(), 0, 'The early timer has not fired yet');
+    c.runTimeouts(100);
+    assert.equal(c.polls(), 1);
+    c.api.receive(JSON.stringify({ready: true, rows: [], busy: false}));
+    assert.equal(c.polls(), 1);
+});
+
+test('blocked periodic ticks alone do not request an immediate follow-up', () => {
+    const c = client();
+    c.tick();
+    c.tick();
+    c.api.receive(JSON.stringify({ready: true, rows: [], busy: false}));
+    assert.equal(c.polls(), 0);
+    assert.equal(c.intervalMs(), 750);
+    c.tick();
+    assert.equal(c.polls(), 1);
+});
+
+test('pending early refresh survives invalid replies without retrying a stalled request', () => {
+    const c = client();
+    c.api.submit('old', 'prompt');
+    c.runTimeouts(100);
+    c.api.receive('invalid JSON');
+    assert.equal(c.polls(), 0);
+    c.advance(16000);
+    c.tick();
+    assert.equal(c.polls(), 0, 'A timeout must not overlap the stalled request');
+    c.api.receive(JSON.stringify({ready: true, rows: [], busy: false}));
+    assert.equal(c.polls(), 1, 'A valid late response releases the deferred check');
+    c.api.receive(JSON.stringify({ready: true, rows: [], busy: false}));
+    assert.equal(c.polls(), 1);
+});
+
+test('deferred refresh acknowledges a result received after OFF before stopping', () => {
+    const c = client();
+    c.api.submit('old', 'prompt');
+    c.runTimeouts(100);
+    c.context.opts.forge_generation_queue_enabled = false;
+    c.api.receive(JSON.stringify({ready: true, enabled: false, busy: false, rows: [], result_seq: 3}));
+    assert.equal(c.polls(), 1);
+    assert.equal(c.lastRequest().ack, 3, 'Process the result before starting the follow-up');
+    c.api.receive(JSON.stringify({ready: true, enabled: false, busy: false, rows: [], result_seq: 0}));
+    c.tick();
+    assert.equal(c.polls(), 1, 'OFF idle must stop after the result is acknowledged');
 });
 
 test('OFF sends the final acknowledgement then stops idle polling', () => {

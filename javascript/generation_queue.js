@@ -17,6 +17,7 @@
     let inFlight = 0;
     let pollStarted = false;
     let statusDirty = false;
+    let earlyRefreshPending = false;
     let optionsReady = Object.keys(opts).length > 0;
     let monitored = null;
     let progressValue = null;
@@ -180,8 +181,8 @@
         sendingAfter = Math.max(0, ...(state.rows || []).map(row => row.number));
         sendingUntil = Date.now() + 5000;
         paint();
-        // One early status check; keep the normal idle polling interval unchanged.
-        setTimeout(tick, 100);
+        // Coalesce early checks while a request is in flight; leave idle polling alone.
+        setTimeout(() => { earlyRefreshPending = true; tick(); }, 100);
         return values;
     }
     function tick() {
@@ -189,7 +190,7 @@
         if (enabled()) stopRepeat();
         // Gradio's load event starts the first request after its event system is ready.
         if (!pollStarted) return;
-        if (state.ready && !enabled() && state.enabled !== true && !state.busy && !commands.length && !state.result_seq && !statusDirty) return;
+        if (state.ready && !enabled() && state.enabled !== true && !state.busy && !commands.length && !state.result_seq && !statusDirty && !earlyRefreshPending) return;
         if (inFlight) {
             if (Date.now() - inFlight < 15000) return;
             error = t("Queue status timed out. Reload the page to reconnect; accepted jobs may still be running.", "キューの状態確認がタイムアウトしました。ページを再読み込みして接続してください。受付済みの生成は続いている場合があります。");
@@ -215,6 +216,7 @@
             pollStarted = true;
             inFlight = Date.now();
             statusDirty = false;
+            earlyRefreshPending = false;
             return JSON.stringify({token, ack, poll_id: uuid(), ...(commands[0] || {})});
         },
         receive(value) {
@@ -239,6 +241,7 @@
                 }
             }
             paint();
+            if (earlyRefreshPending) tick();
         },
     };
     onOptionsAvailable(() => {
