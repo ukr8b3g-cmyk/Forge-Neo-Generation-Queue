@@ -102,8 +102,17 @@ Forge Neo本体のファイルは編集しません。標準コールバック�
 
 `tests/test_queue.py`：順序・入力コピー・重複防止・個別取消・開始との競合・失敗停止・所有者・件数上限。
 
-`tests/test_adapter.py`：実際に導入済みのGradioを用いたイベント接続・入力処理・ユーザー識別・共通設定ガード。
-
-`tests/browser.cjs`：隔離Chromeと導入済みGradio、Forge本体のcall_queue、CPUの模擬生成を使ったUI統合検証。テストサービスは `127.0.0.1:17869`。実Forge／GPU生成の検証とは区別します。
+開発時には、導入済みGradioを用いたイベント接続・入力処理・ユーザー識別・共通設定ガードと、隔離Chrome＋CPU模擬生成によるUI統合検証も行いました。環境依存の検証スクリプトは公開リポジトリには含まれません。実Forge／GPU生成の検証とは区別します。
 
 自動検証と実GPU確認の違いは [TESTING.md](TESTING.md) を参照してください。掲載画像はユーザーのWebUIから提供された画像を切り抜いたものです。
+
+## プロジェクト情報
+
+- [変更履歴](CHANGELOG.md)
+- [不具合報告・開発への参加](CONTRIBUTING.md)：英語・日本語に対応
+- [テストと検証範囲](TESTING.md)
+
+## ライセンス
+
+[MITライセンス](LICENSE)。Copyright (c) 2026 ukr8b3g-cmyk。
+Forge Neo本体や他の第三者プロジェクトには、それぞれのライセンスが適用されます。

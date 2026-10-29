@@ -103,3 +103,14 @@ Forge's source files are not edited. Its existing txt2img generation pipeline an
 ## Disable
 
 Remove the Quicksettings entry if added, disable the extension under **Extensions**, and restart Forge Neo. Existing workflows and generation settings are not rewritten.
+
+## Project information
+
+- [Changelog](CHANGELOG.md)
+- [Bug reports and contributions](CONTRIBUTING.md) — English and Japanese welcome.
+- [Testing and validation scope](TESTING.md)
+
+## License
+
+[MIT License](LICENSE). Copyright (c) 2026 ukr8b3g-cmyk.
+Forge Neo and other third-party projects retain their own licenses.
