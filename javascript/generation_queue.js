@@ -2,7 +2,9 @@
 (() => {
     "use strict";
     let token;
-    const uuid = () => crypto.randomUUID().replaceAll("-", "");
+    // getRandomValues also works on HTTP LAN origins; randomUUID requires HTTPS.
+    const uuid = () => Array.from(crypto.getRandomValues(new Uint8Array(16)),
+        byte => byte.toString(16).padStart(2, "0")).join("");
     try {
         token = sessionStorage.getItem("forge_generation_queue_client");
         if (!/^[a-f0-9]{32}$/.test(token || "")) {
@@ -39,8 +41,10 @@
         const mode = state.ready && (enabled() || ownBusy);
         box.classList.toggle("fq-mode", mode);
         const running = active.find(row => row.state === "running");
+        const newest = (state.rows || []).reduce((last, row) => !last || row.number > last.number ? row : last, null);
+        const latestFailure = newest?.state === "failed" ? newest.error : "";
         box.classList.toggle("fq-generating", !!running);
-        panel.style.setProperty("display", enabled() || ownBusy || state.can_resume || error ? "flex" : "none", "important");
+        panel.style.setProperty("display", enabled() || ownBusy || state.can_resume || error || latestFailure ? "flex" : "none", "important");
         const content = el("fq_content");
         const view = JSON.stringify([state.rows, state.paused, state.can_resume, state.ready, enabled(), error, japanese()]);
         if (!content || lastView === view) return;
@@ -58,12 +62,12 @@
         heading.title = t("Click to view or cancel individual jobs", "クリックで予約の詳細・個別取消");
         details.append(heading);
         content.append(details);
-        if (error || state.paused) {
+        if (error || state.paused || latestFailure) {
             const notice = document.createElement("div");
             notice.className = "fq-notice";
             notice.textContent = t("Check queue", "要確認");
             const failed = (state.rows || []).filter(row => row.state === "failed").at(-1);
-            notice.title = [error || state.paused, state.paused && failed?.error].filter(Boolean).join("\n");
+            notice.title = [error || state.paused, latestFailure || (state.paused && failed?.error)].filter(Boolean).join("\n");
             content.append(notice);
             if (state.can_resume) {
                 const resume = document.createElement("button");
@@ -106,7 +110,7 @@
     function tick() {
         paint();
         if (enabled()) stopRepeat();
-        if (state.ready && !enabled() && !state.busy && !commands.length) return;
+        if (state.ready && !enabled() && !state.busy && !commands.length && !state.result_seq) return;
         if (inFlight && Date.now() - inFlight < 15000) return;
         if (inFlight) {
             error = t("Checking the queue connection. Wait before clicking Generate again.", "キューとの通信を確認中です。Generateを連打せず、接続をお待ちください。");

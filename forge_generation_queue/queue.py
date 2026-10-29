@@ -4,6 +4,10 @@ from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass
 from threading import Condition, Thread
+from time import monotonic
+
+ACTIVE = ("pending", "waiting", "running")
+RESULT_TTL = 30 * 60
 
 
 class HoldQueue(Exception):
@@ -46,8 +50,15 @@ class GenerationQueue:
                 if self.jobs[job_id].owner != owner:
                     raise ValueError("Duplicate job ID.")
                 return self.jobs[job_id]
+            self._release_orphaned_pause()
+            self._expire_results()
             if self._active_count() >= self.limit:
                 raise ValueError(f"Generation queue limit is {self.limit} jobs.")
+            # Reserve delivery space before accepting work. Never evict another
+            # client's unacknowledged result just because a fifth client finishes.
+            owners = set(self.latest) | {j.owner for j in self.jobs.values() if j.state in ACTIVE}
+            if owner not in owners and len(owners) >= self.limit:
+                raise ValueError("Too many clients have pending results. Reconnect those tabs or wait 30 minutes.")
             self.serial += 1
             job = Job(job_id, owner, self.serial, deepcopy(tuple(args)), context,
                       fingerprint, str(args[0])[:100] if args else "")
@@ -60,7 +71,20 @@ class GenerationQueue:
             return job
 
     def _active_count(self):
-        return sum(j.state in ("pending", "waiting", "running") for j in self.jobs.values())
+        return sum(j.state in ACTIVE for j in self.jobs.values())
+
+    def _release_orphaned_pause(self):
+        if self.paused_owner is not None and not any(
+                j.owner == self.paused_owner and j.state in ACTIVE for j in self.jobs.values()):
+            self.paused = ""
+            self.paused_owner = None
+
+    def _expire_results(self):
+        active_owners = {j.owner for j in self.jobs.values() if j.state in ACTIVE}
+        now = monotonic()
+        for owner, (_, _, expires) in list(self.latest.items()):
+            if expires <= now and owner not in active_owners:
+                del self.latest[owner]
 
     def has_work(self):
         with self.cv:
@@ -93,9 +117,7 @@ class GenerationQueue:
                 job.state = "cancelled"
                 job.args = ()
                 job.context = None
-            if not self._active_count():
-                self.paused = ""
-                self.paused_owner = None
+            self._release_orphaned_pause()
             self.cv.notify_all()
             return True
 
@@ -114,7 +136,11 @@ class GenerationQueue:
             history = [j for j in own if j.state not in ("pending", "waiting", "running")][-4:]
             rows = [dict(id=j.id, number=j.number, label=j.label, state=j.state,
                          cancelling=j.cancel_requested, error=j.error) for j in active + history]
-            seq, result = self.latest.get(owner, (0, None))
+            self._expire_results()
+            seq, result, _ = self.latest.get(owner, (0, None, 0))
+            if seq and acknowledged >= seq:
+                del self.latest[owner]
+                seq, result = 0, None
             # Gradio mutates update dictionaries during postprocessing; don't expose originals.
             result = deepcopy(result) if result is not None and seq > acknowledged else None
             return dict(rows=rows, paused=self.paused if self.paused_owner == owner else
@@ -170,9 +196,9 @@ class GenerationQueue:
                         job.context = None
             with self.cv:
                 if result is not None:
-                    self.latest[job.owner] = (job.number, result)
+                    self.latest[job.owner] = (job.number, result, monotonic() + RESULT_TTL)
                     self.latest.move_to_end(job.owner)
-                    while len(self.latest) > 4:
-                        self.latest.popitem(last=False)
+                self._release_orphaned_pause()
+                self._expire_results()
                 self._trim()
                 self.cv.notify_all()

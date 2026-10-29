@@ -23,6 +23,7 @@ Run the portable tests from the repository root:
 
 ```sh
 python -m unittest discover -s tests -p 'test_queue.py' -v
+node --test tests/test_client.cjs
 ```
 
 For JavaScript edits, check syntax with `node --check javascript/generation_queue.js` and verify the affected UI behavior. State which checks you ran; distinguish simulated tests from actual Forge/GPU generation. See [TESTING.md](TESTING.md).

@@ -17,6 +17,7 @@ MESSAGES = {
     "Job not found.": "予約が見つかりません。",
     "The UI is reloading. Reload the page.": "UI再読み込み中です。ページを再読み込みしてください。",
     "Duplicate job ID.": "予約IDが重複しています。",
+    "Too many clients have pending results. Reconnect those tabs or wait 30 minutes.": "未受信結果を持つ操作元が上限に達しました。該当タブを再接続するか、30分お待ちください。",
     "Resume the queue from the client that paused it.": "停止したキューの操作元で再開してください。",
     "Another client's queue is paused.": "別の操作元のキューが停止中です。",
     "Generation failed. Check the settings and resume.": "生成に失敗しました。条件を確認し、再開してください。"

@@ -89,10 +89,12 @@ The limit is **32 running and pending jobs combined**, across the instance. Turn
 - **txt2img only.** img2img, standalone Hires, API generation, and other extensions' buttons retain their original entry points.
 - Inputs are copied when accepted. Seed `-1`, Dynamic Prompts, and similar expansion use the normal generation pipeline. Expanded random prompts and external wildcard files are not frozen when submitted.
 - Keep the **same model and shared settings** while jobs are queued. If saved Settings or style definitions change, the next job pauses without being discarded. Restore the original settings and resume, or cancel the job. Global configuration is not automatically restored.
+- A pause is released when its owner has no unfinished jobs left. Other clients' jobs then perform their own settings checks. Failure details remain visible even if no jobs remain to resume.
 - **Generate forever** is not combined with queue mode; txt2img auto-repeat is stopped while the queue is enabled.
 - An ordinary reload of the same browser tab reconnects. Closing the tab does not cancel accepted jobs. Ownership does not transfer to another tab/browser.
 - Queues are in memory. **Restarting Forge, Reload UI, or Reload script bodies does not preserve pending jobs.** Empty the queue first.
 - The existing gallery shows the latest completed result. Image saving follows Forge's settings; this is not a separate image-history browser.
+- Each client's latest result is retained until that tab acknowledges it, for up to **30 minutes** after completion when it has no unfinished jobs. At most **32 clients** may hold active work or unacknowledged results combined. New clients receive a warning if those slots are full; reconnect the previous tabs or wait for their results to expire. Accepted jobs' delivery slots are reserved, and another client's completion does not evict an unacknowledged result. A newer result for the same client still replaces its older result.
 
 ## Compatibility and verification
 
