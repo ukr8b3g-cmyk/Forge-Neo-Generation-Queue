@@ -15,13 +15,16 @@
     let state = {rows: [], busy: false, ready: false};
     let ack = 0;
     let inFlight = 0;
+    let pollStarted = false;
+    let statusDirty = false;
+    let optionsReady = Object.keys(opts).length > 0;
     let monitored = null;
     let progressValue = null;
     let lastView = "";
     let error = "";
     let sendingUntil = 0;
     let sendingAfter = 0;
-    const connectionWaiters = new Set();
+    const optionsWaiters = new Set();
     const commands = [];
     const el = id => gradioApp().getElementById(id);
     const enabled = () => !!opts.forge_generation_queue_enabled;
@@ -50,19 +53,22 @@
         const active = (state.rows || []).filter(row => ["pending", "waiting", "running"].includes(row.state));
         const ownBusy = active.length > 0;
         const sending = Date.now() < sendingUntil;
-        const mode = state.ready && (enabled() || ownBusy);
+        const mode = (state.ready || sending) && (enabled() || ownBusy);
         box.classList.toggle("fq-mode", mode);
+        // Status polling also marks result outputs pending, even when they are skipped.
+        el("html_info_txt2img")?.classList.toggle("fq-stable-info", enabled() || state.busy || state.result_seq > 0);
         const running = active.find(row => row.state === "running");
         const newest = (state.rows || []).reduce((last, row) => !last || row.number > last.number ? row : last, null);
         const latestFailure = newest?.state === "failed" ? newest.error : "";
         box.classList.toggle("fq-generating", !!running);
-        const connecting = !state.ready && (enabled() || connectionWaiters.size > 0);
-        box.classList.toggle("fq-submitting", !running && (sending || connecting));
-        el("txt2img_generate")?.setAttribute("aria-busy", running || sending || connecting ? "true" : "false");
-        const visible = ownBusy || sending || state.paused || state.can_resume || error || latestFailure || connecting;
+        const loadingOptions = optionsWaiters.size > 0;
+        const connecting = !state.ready && enabled() && !sending;
+        box.classList.toggle("fq-submitting", !running && (sending || connecting || loadingOptions));
+        el("txt2img_generate")?.setAttribute("aria-busy", running || sending || connecting || loadingOptions ? "true" : "false");
+        const visible = ownBusy || sending || state.paused || state.can_resume || error || latestFailure || connecting || loadingOptions;
         panel.style.setProperty("display", visible ? "flex" : "none", "important");
         const content = el("fq_content");
-        const view = JSON.stringify([state.rows, state.paused, state.can_resume, state.ready, enabled(), error, japanese(), sending, connecting]);
+        const view = JSON.stringify([state.rows, state.paused, state.can_resume, state.ready, enabled(), error, japanese(), sending, connecting, loadingOptions]);
         if (!content || lastView === view) return;
         lastView = view;
         const expanded = ownBusy && (content.querySelector("details")?.open || false);
@@ -72,9 +78,10 @@
         details.open = expanded;
         const heading = document.createElement("summary");
         heading.className = "fq-heading";
-        const status = connecting ? t("Connecting…", "接続中…") :
-            state.paused ? t("Paused", "停止中") : running ?
-                running.cancelling ? t("Interrupting", "中断中") : t("Generating", "生成中") : sending ? t("Sending…", "送信中…") : "";
+        const status = state.paused ? t("Paused", "停止中") : running ?
+            running.cancelling ? t("Interrupting", "中断中") : t("Generating", "生成中") :
+            sending ? t("Sending…", "送信中…") : loadingOptions ? t("Loading settings…", "設定読込中…") :
+                connecting ? t("Connecting…", "接続中…") : "";
         heading.textContent = [status, ownBusy ? t(`Remaining: ${active.length}`, `残り ${active.length}件`) : "",
             ownBusy && sending && running ? t("Sending…", "送信中…") : ""].filter(Boolean).join(" · ");
         heading.title = t("Click to view or cancel individual jobs", "クリックで予約の詳細・個別取消");
@@ -90,6 +97,7 @@
             if (state.can_resume) {
                 const resume = document.createElement("button");
                 resume.type = "button";
+                resume.className = "fq-resume";
                 resume.textContent = t("Resume", "再開");
                 resume.onclick = () => command("resume");
                 content.append(resume);
@@ -136,17 +144,17 @@
             regen_txt2img = null;
         }
     }
-    function waitForConnection() {
+    function waitForOptions() {
         return new Promise((resolve, reject) => {
             const waiter = {resolve, timer: null};
             waiter.timer = setTimeout(() => {
-                connectionWaiters.delete(waiter);
-                error = t("Queue connection timed out. Check the Forge log, then try Generate again.", "キューへの接続がタイムアウトしました。Forgeのログを確認し、再度Generateを押してください。");
+                optionsWaiters.delete(waiter);
+                error = t("WebUI settings did not finish loading. Check the Forge log, then try Generate again.", "WebUI設定の読み込みが完了しませんでした。Forgeのログを確認し、再度Generateを押してください。");
                 paint();
                 reject(new Error(error));
             }, 10000);
-            connectionWaiters.add(waiter);
-            tick();
+            optionsWaiters.add(waiter);
+            paint();
         });
     }
     function send(values) {
@@ -157,6 +165,8 @@
         }
         if (error) throw new Error(error);
         values[0] = `fq:${token}:${uuid()}`;
+        // Keep monitoring after OFF until a status request made after this click.
+        statusDirty = true;
         // Immediate feedback is not an accepted job and never changes the count.
         sendingAfter = Math.max(0, ...(state.rows || []).map(row => row.number));
         sendingUntil = Date.now() + 5000;
@@ -168,39 +178,41 @@
     function tick() {
         paint();
         if (enabled()) stopRepeat();
-        if (state.ready && !enabled() && !state.busy && !commands.length && !state.result_seq) return;
-        if (inFlight && Date.now() - inFlight < 15000) return;
+        // Gradio's load event starts the first request after its event system is ready.
+        if (!pollStarted) return;
+        if (state.ready && !enabled() && state.enabled !== true && !state.busy && !commands.length && !state.result_seq && !statusDirty) return;
         if (inFlight) {
-            error = t("Checking the queue connection. Wait before clicking Generate again.", "キューとの通信を確認中です。Generateを連打せず、接続をお待ちください。");
+            if (Date.now() - inFlight < 15000) return;
+            error = t("Queue status timed out. Reload the page to reconnect; accepted jobs may still be running.", "キューの状態確認がタイムアウトしました。ページを再読み込みして接続してください。受付済みの生成は続いている場合があります。");
             paint();
+            return;
         }
         const poll = el("fq_poll");
         if (poll) { inFlight = Date.now(); poll.click(); }
     }
     window.forgeGenerationQueue = {
         submit(...args) {
-            if (!enabled() && !state.busy) return submit(...args);
-            stopRepeat();
-            // Capture the click's inputs before waiting for the initial handshake.
+            // The installed Generate event already routes to the queue server.
+            // Only local options may need to finish loading; status is independent.
             const values = create_submit_args(args);
-            if (!state.ready) return waitForConnection().then(() => send(values));
-            return send(values);
+            const dispatch = () => {
+                if (!enabled() && !state.busy) return submit(...args);
+                stopRepeat();
+                return send(values);
+            };
+            return optionsReady ? dispatch() : waitForOptions().then(dispatch);
         },
         pollArgs() {
+            pollStarted = true;
+            inFlight = Date.now();
+            statusDirty = false;
             return JSON.stringify({token, ack, poll_id: uuid(), ...(commands[0] || {})});
         },
         receive(value) {
-            inFlight = 0;
             try { state = JSON.parse(value); } catch (_) { return; }
+            inFlight = 0;
             error = state.message || "";
             if ((state.rows || []).some(row => row.number > sendingAfter)) sendingUntil = 0;
-            if (state.ready) {
-                for (const waiter of connectionWaiters) {
-                    clearTimeout(waiter.timer);
-                    waiter.resolve();
-                }
-                connectionWaiters.clear();
-            }
             if (commands[0] && state.command_id === commands[0].command_id) commands.shift();
             ack = state.result_seq || ack;
             const running = (state.rows || []).find(row => row.state === "running");
@@ -220,6 +232,16 @@
             paint();
         },
     };
+    onOptionsAvailable(() => {
+        optionsReady = true;
+        for (const waiter of optionsWaiters) {
+            clearTimeout(waiter.timer);
+            waiter.resolve();
+        }
+        optionsWaiters.clear();
+        error = state.message || "";
+        tick();
+    });
     onUiLoaded(() => {
         el("txt2img_generate")?.addEventListener("contextmenu", event => {
             if (enabled()) { event.preventDefault(); event.stopImmediatePropagation(); }

@@ -48,9 +48,11 @@ def build_panel():
         ui["poll"] = gr.Button("Queue status", elem_id="fq_poll", elem_classes=["fq-bridge"])
         # Register events during UI construction. Re-entering `with demo` after
         # launch would recreate Gradio's app object and its authentication state.
-        ui["poll"].click(fn=poll_pending, inputs=[ui["request"]], outputs=[ui["status"]],
-                         js="() => [window.forgeGenerationQueue.pollArgs()]",
-                         queue=False, show_progress="hidden", api_name=False)
+        # One status handler for Gradio's reliable initial load and later polls.
+        gr.on(triggers=[gr.context.Context.root_block.load, ui["poll"].click],
+              fn=poll_pending, inputs=[ui["request"]], outputs=[ui["status"]],
+              js="() => [window.forgeGenerationQueue.pollArgs()]",
+              queue=False, show_progress="hidden", api_name=False)
         ui["status"].change(fn=None, inputs=[ui["status"]],
                              js="value => {window.forgeGenerationQueue.receive(value); return [];}",
                              queue=False, show_progress="hidden")

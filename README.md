@@ -6,7 +6,7 @@ Queue **txt2img** jobs with Forge Neo's existing **Generate** button. Prepare th
 
 - One click adds one job; jobs run sequentially through Forge's existing pipeline.
 - Generate turns **dark green during generation**, then returns to its normal color.
-- A queue submission immediately shows **Sending…** (blue while no job is running). Startup clicks wait up to 10 seconds for the initial connection with their captured inputs, then submit once. A timeout reports a connection error without automatic retry.
+- A queue submission immediately shows **Sending…** (blue while no job is running). Once WebUI settings are available, Generate submits without waiting for the first queue-status reply. Each click submits once; generation submissions are never automatically resent.
 - A single line shows **Generating · Remaining: N**, including the current job and all waiting jobs. Details show only these unfinished jobs; completed and cancelled jobs disappear.
 - When all jobs finish or are cancelled, the count and details disappear automatically. They return when another job is accepted. Errors and pause/resume notices remain available.
 - Click the count to view details and cancel individual jobs. The popup does not push the page down.
@@ -74,7 +74,9 @@ The screenshot shows the exact option to add. Other entries, such as Clip Skip, 
 
 The orange button is idle. **Connecting… / Sending…** use a blue button while no job is running; green means the server reports a running job. **Remaining** includes the running job: three accepted clicks mean three jobs until one finishes or is cancelled.
 
-**Sending…** is brief local feedback, not confirmation that a job has been accepted. It is cleared when a newer server job appears or after five seconds; the remaining count always comes from accepted jobs. The client makes one early status check after submission. During startup, **Connecting…** identifies the handshake wait. If the connection times out, check Forge's log and try Generate again. Actual model loading and GPU generation can still take time.
+**Sending…** is brief local feedback, not confirmation that a job has been accepted. It is cleared when a newer server job appears or after five seconds; the remaining count always comes from accepted jobs. Gradio's page-load event starts status monitoring, with one early check after submission and no overlapping status requests. **Connecting…** means the first status reply has not arrived; it does not block Generate once settings are known.
+
+If WebUI settings themselves are still loading, the click keeps its captured inputs for up to 10 seconds and submits once those settings arrive. An expired click is not sent later. If a status request times out, reload the same tab to reconnect; accepted jobs may still be running, so do not assume that a missing response means the job was rejected. Model loading and GPU generation still take their normal time.
 
 ![Five remaining jobs, with the running job's interrupt button highlighted red on hover](docs/images/queue-details.png)
 
@@ -100,6 +102,20 @@ The expanded queue screenshot was provided by the user from WebUI. The two idle/
 4. Interruption waits for Forge's next interruptible point. Other accepted jobs remain queued and continue afterward. To stop those too, cancel their rows individually.
 
 Turning the queue **OFF does not cancel accepted jobs**. Use the row buttons to stop them.
+
+### Resume a paused queue
+
+**Resume continues unfinished reservations after the queue has stopped because of an error or a settings check.** For example, if the first of three jobs fails and two are still waiting, Resume continues those two after you address the problem. It does not retry the failed job.
+
+The pale blue **Resume** button appears beside **Paused / Check queue** when unfinished jobs remain and you are using the same browser tab that submitted the jobs responsible for the pause. Typical causes are a generation error, changed model/shared Settings/style definitions, or a saved-settings file that could not be read.
+
+1. Hover **Check queue** to read the reason, and check Forge's log for details.
+2. Address the error. For a model/settings-change notice, restore the model and shared settings used when the job was queued, or cancel that reservation with **×**.
+3. Click the pale blue **Resume** button in the same browser tab. The retained jobs continue in order. If the cause remains, the queue can pause again.
+
+**Generate adds new jobs; it does not resume a paused queue**, and new queue submissions are refused while it is paused. Failed and cancelled jobs are not recreated by Resume; submit them again with Generate after resolving the pause if needed.
+
+Resume is hidden during normal generation, normal waiting, and after all jobs finish or are cancelled. It is also hidden when only an error message remains with no unfinished jobs, or when another tab owns the pause. Ordinary **×** cancellation/interruption normally continues to the next job automatically and does not require Resume. Turning the queue **OFF** does not itself pause accepted jobs.
 
 The details popup has a dark background at **100% opacity (no transparency)**. Underlying controls do not show through.
 
