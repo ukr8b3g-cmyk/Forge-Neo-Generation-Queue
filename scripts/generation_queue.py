@@ -49,12 +49,14 @@ def build_panel():
         # Register events during UI construction. Re-entering `with demo` after
         # launch would recreate Gradio's app object and its authentication state.
         # One status handler for Gradio's reliable initial load and later polls.
-        gr.on(triggers=[gr.context.Context.root_block.load, ui["poll"].click],
+        status_event = gr.on(triggers=[gr.context.Context.root_block.load, ui["poll"].click],
               fn=poll_pending, inputs=[ui["request"]], outputs=[ui["status"]],
               js="() => [window.forgeGenerationQueue.pollArgs()]",
-              queue=False, show_progress="hidden", api_name=False)
-        ui["status"].change(fn=None, inputs=[ui["status"]],
-                             js="value => {window.forgeGenerationQueue.receive(value); return [];}",
+              queue=False, trigger_mode="multiple", show_progress="hidden", api_name=False)
+        # .then runs after both success and transport/backend failure. A textbox
+        # change alone never reports failed requests, leaving the client locked.
+        status_event.then(fn=None, inputs=[ui["status"]],
+                             js="value => {window.forgeGenerationQueue.pollFinished(value); return [];}",
                              queue=False, show_progress="hidden")
 
 

@@ -1,5 +1,13 @@
 # Changelog / 変更履歴
 
+## 2026-10-31 — Idle connection recovery / 放置後の通信復旧
+
+- Handle both successful and failed Gradio status requests so failed requests cannot leave the client permanently busy. Validate reply IDs, retry completed failures with 1.5–15 second backoff, and preserve one in-flight status request.
+- Separate connection warnings from generation admission errors so a delayed status reply does not disable manual Generate. Never automatically replay generation requests.
+- Verified with 25 Node tests, 24 Python checks and an installed-Gradio CPU/browser failure-and-delay regression. Real GPU and PC sleep/resume remain untested.
+
+日本語：通信失敗後に状態確認が止まりGenerateまで拒否される問題を修正。成功・失敗の終了通知と応答IDを確認し、失敗した状態確認だけを1.5～15秒の間隔で再試行する。通信エラーを生成受付エラーから分離し、生成要求の自動再送は行わない。Node25件・Python24件・実Gradioの隔離CPU／ブラウザー試験で確認。実GPUと実際のPCスリープ復帰は未検証。
+
 ## 2026-10-29 — Deferred early status refresh / 送信後の再確認保留
 
 - Retain one send-triggered early status check when another request is in flight, then run it after processing the response. Coalesce repeated early checks without overlapping requests or speeding up regular 750ms polling. Preserve result acknowledgement after OFF and timeout behavior without generation retries.

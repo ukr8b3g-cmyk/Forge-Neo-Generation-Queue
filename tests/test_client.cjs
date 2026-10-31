@@ -183,9 +183,55 @@ test('stalled status requests report timeout without overlapping or automatic re
     c.tick();
     c.tick();
     assert.equal(c.polls(), 0);
-    assert.throws(() => c.api.submit('old', 'prompt'), /Queue status timed out/);
+    assert.match(c.api.submit('old', 'prompt')[0], /^fq:/, 'A delayed status request must not disable manual Generate');
     c.api.receive(JSON.stringify({ready: true, rows: [], busy: false}));
     assert.match(c.api.submit('old', 'manual retry')[0], /^fq:/);
+});
+
+test('failed status completes, backs off, and recovers without replaying generation', () => {
+    const c = client();
+    const first = {...c.lastRequest(), ready: true, rows: [], busy: false};
+    c.api.pollFinished(JSON.stringify(first));
+    c.tick();
+    c.api.pollFinished(JSON.stringify(first)); // Gradio retains the old value on failure.
+    const before = c.polls();
+    const id = c.api.submit('old', 'manual click')[0];
+    c.runTimeouts(100);
+    c.advance(1499); c.tick();
+    assert.equal(c.polls(), before);
+    c.advance(1); c.tick();
+    assert.equal(c.polls(), before + 1);
+    c.api.pollFinished(JSON.stringify({...c.lastRequest(), ready:true, rows:[], busy:false}));
+    assert.match(id, /^fq:/);
+    c.advance(750); c.tick();
+    assert.equal(c.polls(), before + 2);
+});
+
+test('repeated failures have bounded backoff and invalid replies recover', () => {
+    const c = client();
+    for (const delay of [1500, 3000, 6000, 12000, 15000, 15000]) {
+        c.api.pollFinished('invalid');
+        const before = c.polls();
+        c.advance(delay - 1); c.tick();
+        assert.equal(c.polls(), before);
+        c.advance(1); c.tick();
+        assert.equal(c.polls(), before + 1);
+    }
+    c.api.pollFinished(JSON.stringify({...c.lastRequest(), ready:true, rows:[], busy:false}));
+    assert.match(c.api.submit('old', 'after recovery')[0], /^fq:/);
+});
+
+test('OFF recovers failed status and delivers final acknowledgement before stopping', () => {
+    const c = client();
+    c.context.opts.forge_generation_queue_enabled = false;
+    c.api.pollFinished('');
+    c.advance(1500); c.tick();
+    c.api.pollFinished(JSON.stringify({...c.lastRequest(), ready:true, enabled:false, busy:false, rows:[], result_seq:7}));
+    c.tick();
+    assert.equal(c.lastRequest().ack, 7);
+    c.api.pollFinished(JSON.stringify({...c.lastRequest(), ready:true, enabled:false, busy:false, rows:[], result_seq:0}));
+    const before=c.polls(); c.tick();
+    assert.equal(c.polls(),before);
 });
 
 test('ready submission schedules one early status check', () => {

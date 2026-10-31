@@ -23,6 +23,10 @@
     let progressValue = null;
     let lastView = "";
     let error = "";
+    let connectionError = "";
+    let pollId = null;
+    let retryAt = 0;
+    let failures = 0;
     let sendingUntil = 0;
     let sendingAfter = 0;
     const optionsWaiters = new Set();
@@ -71,10 +75,10 @@
         const connecting = !state.ready && enabled() && !sending;
         box.classList.toggle("fq-submitting", !running && (sending || connecting || loadingOptions));
         el("txt2img_generate")?.setAttribute("aria-busy", running || sending || connecting || loadingOptions ? "true" : "false");
-        const visible = ownBusy || sending || state.paused || state.can_resume || error || latestFailure || connecting || loadingOptions;
+        const visible = ownBusy || sending || state.paused || state.can_resume || error || connectionError || latestFailure || connecting || loadingOptions;
         panel.style.setProperty("display", visible ? "flex" : "none", "important");
         const content = el("fq_content");
-        const view = JSON.stringify([state.rows, state.paused, state.can_resume, state.ready, enabled(), error, japanese(), sending, connecting, loadingOptions]);
+        const view = JSON.stringify([state.rows, state.paused, state.can_resume, state.ready, enabled(), error, connectionError, japanese(), sending, connecting, loadingOptions]);
         if (!content || lastView === view) return;
         lastView = view;
         const expanded = ownBusy && (content.querySelector("details")?.open || false);
@@ -97,12 +101,12 @@
         heading.title = t("Click to view or cancel individual jobs", "クリックで予約の詳細・個別取消");
         details.append(heading);
         content.append(details);
-        if (error || state.paused || latestFailure) {
+        if (error || connectionError || state.paused || latestFailure) {
             const notice = document.createElement("div");
             notice.className = "fq-notice";
-            notice.textContent = t("Check queue", "要確認");
+            notice.textContent = connectionError ? t("Reconnecting…", "再接続中…") : t("Check queue", "要確認");
             const failed = (state.rows || []).filter(row => row.state === "failed").at(-1);
-            notice.title = [error || state.paused, latestFailure || (state.paused && failed?.error)].filter(Boolean).join("\n");
+            notice.title = [connectionError, error || state.paused, latestFailure || (state.paused && failed?.error)].filter(Boolean).join("\n");
             content.append(notice);
             if (state.can_resume) {
                 const resume = document.createElement("button");
@@ -193,10 +197,11 @@
         if (state.ready && !enabled() && state.enabled !== true && !state.busy && !commands.length && !state.result_seq && !statusDirty && !earlyRefreshPending) return;
         if (inFlight) {
             if (Date.now() - inFlight < 15000) return;
-            error = t("Queue status timed out. Reload the page to reconnect; accepted jobs may still be running.", "キューの状態確認がタイムアウトしました。ページを再読み込みして接続してください。受付済みの生成は続いている場合があります。");
+            connectionError = t("Queue status is delayed. Waiting for the connection; generation requests are not replayed.", "状態確認が遅れています。通信の復旧を待っています。生成要求は自動再送しません。");
             paint();
             return;
         }
+        if (Date.now() < retryAt) return;
         const poll = el("fq_poll");
         if (poll) { inFlight = Date.now(); poll.click(); }
     }
@@ -217,11 +222,34 @@
             inFlight = Date.now();
             statusDirty = false;
             earlyRefreshPending = false;
-            return JSON.stringify({token, ack, poll_id: uuid(), ...(commands[0] || {})});
+            pollId = uuid();
+            return JSON.stringify({token, ack, poll_id: pollId, ...(commands[0] || {})});
+        },
+        pollFinished(value) {
+            // On failure Gradio leaves the previous textbox value intact. Its
+            // request ID prevents an old snapshot from masquerading as recovery.
+            let reply;
+            try { reply = JSON.parse(value); } catch (_) {}
+            if (reply && reply.poll_id === pollId && pollId !== null) {
+                pollId = null;
+                this.receive(value);
+                return;
+            }
+            if (!pollId) return;
+            pollId = null;
+            inFlight = 0;
+            statusDirty = true;
+            failures = Math.min(failures + 1, 5);
+            retryAt = Date.now() + Math.min(15000, 750 * 2 ** failures);
+            connectionError = t("Queue status connection failed. Retrying automatically; generation requests are not replayed.", "状態確認の通信が失敗しました。自動で再接続します。生成要求は自動再送しません。");
+            paint();
         },
         receive(value) {
             try { state = JSON.parse(value); } catch (_) { return; }
             inFlight = 0;
+            connectionError = "";
+            failures = 0;
+            retryAt = 0;
             error = state.message || "";
             if ((state.rows || []).some(row => row.number > sendingAfter)) sendingUntil = 0;
             if (commands[0] && state.command_id === commands[0].command_id) commands.shift();

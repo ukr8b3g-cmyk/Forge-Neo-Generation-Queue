@@ -123,6 +123,12 @@ The limit is **32 running and pending jobs combined**, across the instance. Turn
 
 ## Scope and limitations
 
+### Connection recovery after idle
+
+Failed status requests show **Reconnecting…** and retry with backoff from 1.5 seconds up to 15 seconds. Status connection errors no longer block manual Generate. Requests still in flight are allowed to finish without overlap. Only status requests are retried; generation requests are never replayed automatically. If Forge or the network is unavailable, wait for it to recover; a click alone does not confirm that a job was accepted.
+
+After installing this fix, let accepted jobs finish, restart Forge Neo, and refresh the browser with **Ctrl+F5**.
+
 - **txt2img only.** img2img, standalone Hires, API generation, and other extensions' buttons retain their original entry points.
 - Inputs are copied when accepted. Seed `-1`, Dynamic Prompts, and similar expansion use the normal generation pipeline. Expanded random prompts and external wildcard files are not frozen when submitted.
 - Keep the **same model and shared settings** while jobs are queued. If saved Settings or style definitions change, the next job pauses without being discarded. Restore the original settings and resume, or cancel the job. Global configuration is not automatically restored.
