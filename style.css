@@ -32,10 +32,8 @@
 @media (prefers-reduced-motion: reduce) { #fq_content .fq-progress, #fq_content .fq-heading-running::before { transition: none; } }
 #fq_content .fq-row span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; flex: 1; min-width: 0; }
 #fq_content button { cursor: pointer; padding: 2px 9px; border: 1px solid var(--border-color-primary, #888); border-radius: 4px; }
-#fq_content .fq-resume { background: #dbeafe; color: #17365d; border-color: #93c5fd; font-weight: 600; }
-#fq_content .fq-resume:hover { background: #bfdbfe; }
-#fq_content .fq-resume:focus-visible { outline: 2px solid #60a5fa; outline-offset: 2px; }
 #fq_content .fq-row button { flex: 0 0 auto; min-width: 28px; background: #111c2c; color: #e2e8f0; border-color: #475569; }
 #fq_content .fq-row button:not(:disabled):hover { background: #b91c1c; color: #fff; border-color: #f87171; }
 #fq_content button:disabled { opacity: .5; cursor: default; }
 #fq_content .fq-notice { color: var(--error-text-color, #c97b18); white-space: nowrap; cursor: help; }
+#fq_content .fq-job-error { padding: 4px 6px; color: #fbbf82; overflow-wrap: anywhere; white-space: pre-wrap; }

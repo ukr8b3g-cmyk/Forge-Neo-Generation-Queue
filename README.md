@@ -8,7 +8,7 @@ Queue **txt2img** jobs with Forge Neo's existing **Generate** button. Prepare th
 - Generate turns **dark green during generation**, then returns to its normal color.
 - A queue submission immediately shows **Sending…** (blue while no job is running). Once WebUI settings are available, Generate submits without waiting for the first queue-status reply. Each click submits once; generation submissions are never automatically resent.
 - A single line shows **Generating · Remaining: N**, including the current job and all waiting jobs. Its blue background fills from left to right with the current job's progress, even while details are closed. Details show only these unfinished jobs; completed and cancelled jobs disappear.
-- When all jobs finish or are cancelled, the count and details disappear automatically. They return when another job is accepted. Errors and pause/resume notices remain available.
+- When no jobs remain, the count disappears. Recent generation errors are available in the details.
 - Click the count to view details and cancel individual jobs. The popup does not push the page down.
 - Optional Quicksettings toggle. **OFF by default.**
 - Japanese for Japanese WebUI locales; English for English, unset/`None`, and other locales. Browser/OS language is not used.
@@ -90,7 +90,7 @@ The expanded queue screenshot was provided by the user from WebUI. The two idle/
 2. While it runs, prepare the next inputs and click **Generate** again. Confirm the inputs have reached WebUI and the remaining count increases.
 3. Jobs run in acceptance order. Batch Count and Batch Size are part of each job.
 4. Click the count for details. **×** on a pending job cancels that job. **×** on the running job requests interruption; the next job starts after interruption finishes.
-5. If generation fails, remaining jobs pause. Check the problem and click **Resume**. The failed job is not retried automatically.
+5. If a job fails, open the details to read its error. The next job starts automatically. To retry the failed job after correcting the cause, submit it again with **Generate**.
 
 ### Cancel or interrupt with ×
 
@@ -102,20 +102,6 @@ The expanded queue screenshot was provided by the user from WebUI. The two idle/
 4. Interruption waits for Forge's next interruptible point. Other accepted jobs remain queued and continue afterward. To stop those too, cancel their rows individually.
 
 Turning the queue **OFF does not cancel accepted jobs**. Use the row buttons to stop them.
-
-### Resume a paused queue
-
-**Resume continues unfinished reservations after the queue has stopped because of an error or a settings check.** For example, if the first of three jobs fails and two are still waiting, Resume continues those two after you address the problem. It does not retry the failed job.
-
-The pale blue **Resume** button appears beside **Paused / Check queue** when unfinished jobs remain and you are using the same browser tab that submitted the jobs responsible for the pause. Typical causes are a generation error, changed model/shared Settings/style definitions, or a saved-settings file that could not be read.
-
-1. Hover **Check queue** to read the reason, and check Forge's log for details.
-2. Address the error. For a model/settings-change notice, restore the model and shared settings used when the job was queued, or cancel that reservation with **×**.
-3. Click the pale blue **Resume** button in the same browser tab. The retained jobs continue in order. If the cause remains, the queue can pause again.
-
-**Generate adds new jobs; it does not resume a paused queue**, and new queue submissions are refused while it is paused. Failed and cancelled jobs are not recreated by Resume; submit them again with Generate after resolving the pause if needed.
-
-Resume is hidden during normal generation, normal waiting, and after all jobs finish or are cancelled. It is also hidden when only an error message remains with no unfinished jobs, or when another tab owns the pause. Ordinary **×** cancellation/interruption normally continues to the next job automatically and does not require Resume. Turning the queue **OFF** does not itself pause accepted jobs.
 
 The details popup has a dark background at **100% opacity (no transparency)**. Underlying controls do not show through.
 
@@ -131,8 +117,8 @@ After installing this fix, let accepted jobs finish, restart Forge Neo, and refr
 
 - **txt2img only.** img2img, standalone Hires, API generation, and other extensions' buttons retain their original entry points.
 - Inputs are copied when accepted. Seed `-1`, Dynamic Prompts, and similar expansion use the normal generation pipeline. Expanded random prompts and external wildcard files are not frozen when submitted.
-- Keep the **same model and shared settings** while jobs are queued. If saved Settings or style definitions change, the next job pauses without being discarded. Restore the original settings and resume, or cancel the job. Global configuration is not automatically restored.
-- A pause is released when its owner has no unfinished jobs left. Other clients' jobs then perform their own settings checks. Failure details remain visible even if no jobs remain to resume.
+- Each accepted job keeps its checkpoint, VAE / text encoders, diffusion storage type, shared option values, style definitions and generation inputs. Changing the model or settings for the next submission does not change jobs already in the queue. For example, nine jobs submitted with model A still use A after selecting B; a new job submitted with B uses B. Explicit per-job overrides retain their native precedence.
+- Forge loads each job's model when it runs; model weights are not duplicated for every reservation. If a queued model file has been removed, that job fails visibly and later jobs continue. There is no Resume action. External files and independent extension-global state are not archived with a job.
 - **Generate forever** is not combined with queue mode; txt2img auto-repeat is stopped while the queue is enabled.
 - An ordinary reload of the same browser tab reconnects. Closing the tab does not cancel accepted jobs. Ownership does not transfer to another tab/browser.
 - Queues are in memory. **Restarting Forge, Reload UI, or Reload script bodies does not preserve pending jobs.** Empty the queue first.
@@ -141,7 +127,7 @@ After installing this fix, let accepted jobs finish, restart Forge Neo, and refr
 
 ## Compatibility and verification
 
-Version **0.1.0** was developed against Forge Neo commit `2900d5948a17ec993075fb810a695ce4f674bd0c`, Gradio **4.40.0**. Other versions have not been verified. If the txt2img event contract differs, the extension logs a warning and leaves the native Generate event unchanged.
+Version **0.2.0** was developed against Forge Neo commit `2900d5948a17ec993075fb810a695ce4f674bd0c`, Gradio **4.40.0**. Other versions have not been verified. If the txt2img event contract differs, the extension logs a warning and leaves the native Generate event unchanged.
 
 Forge's source files are not edited. Its existing txt2img generation pipeline and GPU lock are used. Automated checks cover ordering, cancellation, input copies, locale selection, Gradio integration, and compact UI behavior. Isolated browser generation uses a CPU simulation and **does not establish real Forge/GPU acceptance**. Settings and expanded queue screenshots are user-supplied WebUI captures; the idle/generating examples use sample jobs. See [testing notes](TESTING.md).
 

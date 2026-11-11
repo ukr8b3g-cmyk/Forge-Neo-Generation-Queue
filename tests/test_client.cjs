@@ -7,6 +7,36 @@ const vm = require('node:vm');
 const {test} = require('node:test');
 const source = fs.readFileSync(path.join(__dirname, '../javascript/generation_queue.js'), 'utf8');
 
+test('model inputs are separate from native inputs and output trimming', () => {
+    const {context, api} = client();
+    context.create_submit_args = args => Array.from(args).slice(0, -5);
+    const modules = ['vae.safetensors', 'encoder.safetensors'];
+    const values = api.submitSnapshot(3, 'old', 'prompt A', 42, 'model A', modules, 'Automatic', [], null, '', '', '');
+    modules.length = 0;
+    assert.deepEqual(JSON.parse(JSON.stringify(values.slice(1))),
+        ['prompt A', 42, 'model A', ['vae.safetensors', 'encoder.safetensors'], 'Automatic']);
+    assert.match(values[0], /^fq:/);
+});
+
+test('model inputs keep click-time values while waiting for options', async () => {
+    const c = client({options: {}});
+    const modules = ['old.safetensors'];
+    const pending = c.api.submitSnapshot(2, 'old', 'prompt', 'model A', modules, 'FP8');
+    modules[0] = 'new.safetensors';
+    c.loadOptions({forge_generation_queue_enabled: true});
+    assert.deepEqual(JSON.parse(JSON.stringify((await pending).slice(1))),
+        ['prompt', 'model A', ['old.safetensors'], 'FP8']);
+});
+
+test('OFF native submit does not receive appended model inputs', () => {
+    const {context, api} = client({options: {forge_generation_queue_enabled: false}});
+    let received;
+    context.submit = (...args) => { received = args; return ['task(native)', args[1]]; };
+    const result = api.submitSnapshot(2, 'old', 'prompt', 'model B', [], 'Automatic', [], null, '', '', '');
+    assert.deepEqual(received, ['old', 'prompt', [], null, '', '', '']);
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), ['task(native)', 'prompt', 'model B', [], 'Automatic']);
+});
+
 function client({stored = null, storageDenied = false, nodes = {},
     options = {forge_generation_queue_enabled: true}, load = true} = {}) {
     let interval;

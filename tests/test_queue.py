@@ -6,7 +6,7 @@ from threading import Event, current_thread
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from forge_generation_queue.queue import GenerationQueue, HoldQueue
+from forge_generation_queue.queue import GenerationQueue
 
 
 def until(predicate, seconds=3):
@@ -37,12 +37,12 @@ class QueueTests(unittest.TestCase):
 
         q = self.make(execute)
         source = ["A", [1]]
-        q.enqueue("a", (None, "owner"), source, None, "fp")
+        q.enqueue("a", (None, "owner"), source, None)
         until(lambda: q.jobs["a"].state == "running")
         source[1][0] = 99
-        q.enqueue("a", (None, "owner"), ["duplicate"], None, "fp")
-        q.enqueue("b", (None, "owner"), ["B"], None, "fp")
-        q.enqueue("c", (None, "owner"), ["C"], None, "fp")
+        q.enqueue("a", (None, "owner"), ["duplicate"], None)
+        q.enqueue("b", (None, "owner"), ["B"], None)
+        q.enqueue("c", (None, "owner"), ["C"], None)
         self.assertFalse(q.cancel((None, "other"), "b"))
         self.assertTrue(q.cancel((None, "owner"), "b"))
         gate.set()
@@ -63,7 +63,7 @@ class QueueTests(unittest.TestCase):
             queue.claim(job, lambda: started.append(job.id))
 
         q = self.make(execute)
-        q.enqueue("a", (None, "owner"), ["A"], None, "fp")
+        q.enqueue("a", (None, "owner"), ["A"], None)
         until(lambda: q.jobs["a"].state == "waiting")
         q.cancel((None, "owner"), "a")
         gate.set()
@@ -83,8 +83,8 @@ class QueueTests(unittest.TestCase):
             interrupted.append(job.id)
 
         q = self.make(execute, interrupt)
-        q.enqueue("a", (None, "owner"), ["A"], None, "fp")
-        q.enqueue("b", (None, "owner"), ["B"], None, "fp")
+        q.enqueue("a", (None, "owner"), ["A"], None)
+        q.enqueue("b", (None, "owner"), ["B"], None)
         until(lambda: q.jobs["a"].state == "running")
         q.cancel((None, "owner"), "a")
         q.cancel((None, "owner"), "a")
@@ -93,42 +93,34 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(interrupted, ["a"])
         self.assertEqual(q.jobs["a"].state, "cancelled")
 
-    def test_guard_holds_reservation_and_requires_owner_resume(self):
-        valid = Event()
-
-        def execute(job, queue):
-            if not valid.is_set():
-                raise HoldQueue("settings changed")
-            queue.claim(job, lambda: None)
-
-        q = self.make(execute)
-        q.enqueue("a", ("user", "owner"), ["A"], None, "fp")
-        until(lambda: q.paused)
-        self.assertEqual(q.jobs["a"].state, "pending")
-        with self.assertRaises(ValueError):
-            q.resume(("user", "other"))
-        valid.set()
-        q.resume(("user", "owner"))
-        until(lambda: q.jobs["a"].state == "done")
-
-    def test_failure_stops_and_preserves_following_reservation(self):
+    def test_failed_jobs_do_not_stop_fifo_or_replay(self):
         gate = Event()
+        self.addCleanup(gate.set)
+        attempts = []
 
         def execute(job, queue):
             queue.claim(job, lambda: None)
             gate.wait(2)
-            if job.id == "a":
-                raise RuntimeError("test error")
+            attempts.append(job.id)
+            if job.id in {"a", "b"}:
+                raise RuntimeError(f"{job.id} failed")
+            return ({"value": job.id},)
 
         q = self.make(execute)
-        q.enqueue("a", (None, "owner"), ["A"], None, "fp")
-        q.enqueue("b", (None, "owner"), ["B"], None, "fp")
+        q.enqueue("a", "owner", ["A"], None)
+        q.enqueue("b", "owner", ["B"], None)
+        q.enqueue("c", "other", ["C"], None)
+        q.enqueue("d", "owner", ["D"], None)
         gate.set()
-        until(lambda: q.paused)
-        self.assertEqual(q.jobs["a"].state, "failed")
-        self.assertEqual(q.jobs["b"].state, "pending")
-        q.resume((None, "owner"))
-        until(lambda: q.jobs["b"].state == "done")
+        until(lambda: not q.has_work())
+        self.assertEqual(attempts, ["a", "b", "c", "d"])
+        self.assertEqual([q.jobs[job_id].state for job_id in attempts],
+                         ["failed", "failed", "done", "done"])
+        state, result = q.snapshot("owner")
+        self.assertEqual([row["error"] for row in state["rows"] if row["error"]],
+                         ["a failed", "b failed"])
+        self.assertEqual(result, ({"value": "d"},))
+        self.assertEqual(q.snapshot("other")[1], ({"value": "c"},))
 
     def test_limit_close_and_owner_isolation(self):
         gate = Event()
@@ -138,64 +130,36 @@ class QueueTests(unittest.TestCase):
             gate.wait(2)
 
         q = self.make(execute, limit=2)
-        q.enqueue("a", (None, "owner"), ["private"], None, "fp")
-        q.enqueue("b", (None, "owner"), ["B"], None, "fp")
+        q.enqueue("a", (None, "owner"), ["private"], None)
+        q.enqueue("b", (None, "owner"), ["B"], None)
         with self.assertRaises(ValueError):
-            q.enqueue("c", (None, "owner"), ["C"], None, "fp")
+            q.enqueue("c", (None, "owner"), ["C"], None)
         self.assertEqual(q.snapshot((None, "other"))[0]["rows"], [])
         q.close()
         gate.set()
         q.worker.join(2)
         self.assertFalse(q.worker.is_alive())
         with self.assertRaises(ValueError):
-            q.enqueue("d", (None, "owner"), ["D"], None, "fp")
+            q.enqueue("d", (None, "owner"), ["D"], None)
 
-    def test_cancel_last_held_owner_releases_other_client(self):
-        def execute(job, queue):
-            if job.owner == "A":
-                raise HoldQueue("settings changed")
-            queue.claim(job, lambda: None)
+    def test_error_from_interrupted_job_does_not_block_following_reservation(self):
+        stopped = Event()
+        self.addCleanup(stopped.set)
 
-        q = self.make(execute)
-        q.enqueue("a", "A", ["A"], None, "fp")
-        until(lambda: q.paused)
-        q.enqueue("b", "B", ["B"], None, "fp")
-        q.cancel("A", "a")
-        until(lambda: q.jobs["b"].state == "done")
-        self.assertFalse(q.paused)
-        self.assertIsNone(q.paused_owner)
-
-    def test_failure_without_same_owner_jobs_does_not_block_other_client(self):
         def execute(job, queue):
             queue.claim(job, lambda: None)
-            if job.owner == "A":
-                raise RuntimeError("test error")
+            if job.id == "a":
+                stopped.wait(2)
+                raise RuntimeError("Interrupted")
 
-        q = self.make(execute)
-        q.enqueue("a", "A", ["A"], None, "fp")
-        until(lambda: q.jobs["a"].state == "failed")
-        q.enqueue("b", "B", ["B"], None, "fp")
-        until(lambda: q.jobs["b"].state == "done")
-        self.assertFalse(q.paused)
-        self.assertEqual(q.snapshot("A")[0]["rows"][0]["error"], "test error")
-
-    def test_cancel_owner_must_not_release_its_other_held_job(self):
-        def execute(job, queue):
-            raise HoldQueue("settings changed")
-
-        q = self.make(execute)
-        q.enqueue("a", "A", ["A"], None, "fp")
-        until(lambda: q.paused)
-        q.enqueue("a2", "A", ["A2"], None, "fp")
-        q.enqueue("b", "B", ["B"], None, "fp")
-        q.cancel("A", "a")
-        self.assertEqual(q.paused_owner, "A")
-        with self.assertRaises(ValueError):
-            q.resume("B")
-        q.cancel("A", "a2")
-        # B must still pass its own settings guard, rather than bypassing it.
-        until(lambda: q.paused_owner == "B")
-        self.assertEqual(q.jobs["b"].state, "pending")
+        q = self.make(execute, interrupt=lambda job: stopped.set())
+        first = q.enqueue("a", "owner", ["A"], None)
+        second = q.enqueue("b", "owner", ["B"], None)
+        until(lambda: first.state == "running")
+        self.assertTrue(q.cancel("owner", "a"))
+        until(lambda: second.state == "done")
+        self.assertEqual(first.state, "cancelled")
+        self.assertEqual(first.error, "")
 
     def test_five_clients_keep_results_until_acknowledged(self):
         def execute(job, queue):
@@ -204,7 +168,7 @@ class QueueTests(unittest.TestCase):
 
         q = self.make(execute)
         for owner in range(5):
-            q.enqueue(str(owner), owner, [owner], None, "fp")
+            q.enqueue(str(owner), owner, [owner], None)
         until(lambda: not q.has_work())
         for owner in range(5):
             state, result = q.snapshot(owner)
@@ -223,19 +187,19 @@ class QueueTests(unittest.TestCase):
             return (job.owner,)
 
         q = self.make(execute, limit=2)
-        q.enqueue("a", "A", ["A"], None, "fp")
+        q.enqueue("a", "A", ["A"], None)
         gate.set()
         until(lambda: not q.has_work())
         state, _ = q.snapshot("A")
         gate.clear()
-        q.enqueue("b", "B", ["B"], None, "fp")
+        q.enqueue("b", "B", ["B"], None)
         until(lambda: q.jobs["b"].state == "running")
         with self.assertRaisesRegex(ValueError, "pending results"):
-            q.enqueue("c", "C", ["C"], None, "fp")
+            q.enqueue("c", "C", ["C"], None)
         q.snapshot("B", state["result_seq"])  # B cannot release A's delivery slot.
         self.assertIn("A", q.latest)
         q.snapshot("A", state["result_seq"])
-        q.enqueue("c", "C", ["C"], None, "fp")
+        q.enqueue("c", "C", ["C"], None)
         gate.set()
         until(lambda: not q.has_work())
         self.assertEqual(q.snapshot("B")[1], ("B",))
@@ -248,10 +212,10 @@ class QueueTests(unittest.TestCase):
 
         q = self.make(execute, limit=1)
         with patch("forge_generation_queue.queue.monotonic", return_value=100):
-            q.enqueue("a", "A", ["A"], None, "fp")
+            q.enqueue("a", "A", ["A"], None)
             until(lambda: not q.has_work())
         with patch("forge_generation_queue.queue.monotonic", return_value=1901):
-            q.enqueue("b", "B", ["B"], None, "fp")
+            q.enqueue("b", "B", ["B"], None)
             until(lambda: not q.has_work())
             self.assertIsNone(q.snapshot("A")[1])
             self.assertEqual(q.snapshot("B")[1], ("B",))
@@ -262,10 +226,10 @@ class QueueTests(unittest.TestCase):
             return (job.id,)
 
         q = self.make(execute)
-        q.enqueue("a", "A", ["A"], None, "fp")
+        q.enqueue("a", "A", ["A"], None)
         until(lambda: not q.has_work())
         first, _ = q.snapshot("A")
-        q.enqueue("b", "A", ["B"], None, "fp")
+        q.enqueue("b", "A", ["B"], None)
         until(lambda: not q.has_work())
         self.assertEqual(q.snapshot("A", first["result_seq"])[1], ("b",))
 
@@ -314,7 +278,7 @@ class QueueTests(unittest.TestCase):
 
                 q = self.make(execute)
                 arrived, release = self.completion_boundary(q, "last-job")
-                q.enqueue("last-job", "owner", ["prompt"], object(), "fp")
+                q.enqueue("last-job", "owner", ["prompt"], object())
                 try:
                     self.assertTrue(arrived.wait(3), "completion boundary not reached")
                     state, result = q.snapshot("owner")
@@ -340,15 +304,15 @@ class QueueTests(unittest.TestCase):
         q = self.make(execute)
         arrived, release = self.completion_boundary(q, "last-job")
         for n in range(31):
-            q.enqueue("prefill-" + str(n), n, ["prompt"], None, "fp")
+            q.enqueue("prefill-" + str(n), n, ["prompt"], None)
         with q.cv:
             self.assertTrue(q.cv.wait_for(lambda: len(q.latest) == 31, timeout=3))
-        q.enqueue("last-job", "last-owner", ["prompt"], None, "fp")
+        q.enqueue("last-job", "last-owner", ["prompt"], None)
         try:
             self.assertTrue(arrived.wait(3), "completion boundary not reached")
             self.assertFalse(q.has_work())
             with self.assertRaisesRegex(ValueError, "pending results"):
-                q.enqueue("extra", "33rd-owner", ["prompt"], None, "fp")
+                q.enqueue("extra", "33rd-owner", ["prompt"], None)
             self.assertEqual(len(q.latest), 32)
             self.assertEqual(q.snapshot("last-owner")[1], ("last-owner",))
         finally:

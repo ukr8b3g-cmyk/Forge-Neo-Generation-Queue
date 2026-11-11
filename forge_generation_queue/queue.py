@@ -10,10 +10,6 @@ ACTIVE = ("pending", "waiting", "running")
 RESULT_TTL = 30 * 60
 
 
-class HoldQueue(Exception):
-    """Keep the reservation and wait for an explicit resume."""
-
-
 @dataclass
 class Job:
     id: str
@@ -21,8 +17,8 @@ class Job:
     number: int
     args: tuple
     context: object
-    fingerprint: str
     label: str
+    settings: object = None
     state: str = "pending"
     cancel_requested: bool = False
     error: str = ""
@@ -37,12 +33,10 @@ class GenerationQueue:
         self.jobs = OrderedDict()
         self.latest = OrderedDict()
         self.serial = 0
-        self.paused = ""
-        self.paused_owner = None
         self.closed = False
         self.worker = None
 
-    def enqueue(self, job_id, owner, args, context, fingerprint):
+    def enqueue(self, job_id, owner, args, context, settings=None):
         with self.cv:
             if self.closed:
                 raise ValueError("The UI is reloading. Reload the page.")
@@ -50,7 +44,6 @@ class GenerationQueue:
                 if self.jobs[job_id].owner != owner:
                     raise ValueError("Duplicate job ID.")
                 return self.jobs[job_id]
-            self._release_orphaned_pause()
             self._expire_results()
             if self._active_count() >= self.limit:
                 raise ValueError(f"Generation queue limit is {self.limit} jobs.")
@@ -61,7 +54,7 @@ class GenerationQueue:
                 raise ValueError("Too many clients have pending results. Reconnect those tabs or wait 30 minutes.")
             self.serial += 1
             job = Job(job_id, owner, self.serial, deepcopy(tuple(args)), context,
-                      fingerprint, str(args[0])[:100] if args else "")
+                      str(args[0])[:100] if args else "", deepcopy(settings))
             self.jobs[job_id] = job
             self._trim()
             if self.worker is None or not self.worker.is_alive():
@@ -72,12 +65,6 @@ class GenerationQueue:
 
     def _active_count(self):
         return sum(j.state in ACTIVE for j in self.jobs.values())
-
-    def _release_orphaned_pause(self):
-        if self.paused_owner is not None and not any(
-                j.owner == self.paused_owner and j.state in ACTIVE for j in self.jobs.values()):
-            self.paused = ""
-            self.paused_owner = None
 
     def _expire_results(self):
         active_owners = {j.owner for j in self.jobs.values() if j.state in ACTIVE}
@@ -117,17 +104,9 @@ class GenerationQueue:
                 job.state = "cancelled"
                 job.args = ()
                 job.context = None
-            self._release_orphaned_pause()
+                job.settings = None
             self.cv.notify_all()
             return True
-
-    def resume(self, owner):
-        with self.cv:
-            if self.paused_owner not in (None, owner):
-                raise ValueError("Resume the queue from the client that paused it.")
-            self.paused = ""
-            self.paused_owner = None
-            self.cv.notify_all()
 
     def snapshot(self, owner, acknowledged=0):
         with self.cv:
@@ -143,10 +122,7 @@ class GenerationQueue:
                 seq, result = 0, None
             # Gradio mutates update dictionaries during postprocessing; don't expose originals.
             result = deepcopy(result) if result is not None and seq > acknowledged else None
-            return dict(rows=rows, paused=self.paused if self.paused_owner == owner else
-                        ("Another client's queue is paused." if self.paused else ""),
-                        can_resume=self.paused_owner == owner,
-                        busy=bool(self._active_count()), result_seq=seq), result
+            return dict(rows=rows, busy=bool(self._active_count()), result_seq=seq), result
 
     def close(self):
         with self.cv:
@@ -156,6 +132,7 @@ class GenerationQueue:
                     job.state = "cancelled"
                     job.args = ()
                     job.context = None
+                    job.settings = None
             self.cv.notify_all()
 
     def _run(self):
@@ -165,7 +142,7 @@ class GenerationQueue:
                     if self.closed:
                         return
                     job = next((j for j in self.jobs.values() if j.state == "pending"), None)
-                    if job is not None and not self.paused:
+                    if job is not None:
                         job.state = "waiting"
                         break
                     self.cv.wait()
@@ -173,31 +150,24 @@ class GenerationQueue:
             failure = None
             try:
                 result = self.execute(job, self)
-            except HoldQueue as exc:
-                with self.cv:
-                    if job.state != "cancelled":
-                        job.state = "pending"
-                        self.paused = str(exc)
-                        self.paused_owner = job.owner
-                continue
             except Exception as exc:
-                failure = str(exc)[:500]
+                failure = (str(exc) or type(exc).__name__)[:500]
             # Publish terminal state, result, freed inputs and client accounting
             # together. OFF clients may stop polling as soon as busy becomes false.
             with self.cv:
-                if failure is not None:
+                if job.cancel_requested or job.state == "cancelled":
+                    job.state = "cancelled"
+                elif failure is not None:
                     job.state = "failed"
                     job.error = failure
-                    self.paused = "Generation failed. Check the settings and resume."
-                    self.paused_owner = job.owner
-                elif job.state != "cancelled":
-                    job.state = "cancelled" if job.cancel_requested else "done"
+                else:
+                    job.state = "done"
                 job.args = ()
                 job.context = None
+                job.settings = None
                 if result is not None:
                     self.latest[job.owner] = (job.number, result, monotonic() + RESULT_TTL)
                     self.latest.move_to_end(job.owner)
-                self._release_orphaned_pause()
                 self._expire_results()
                 self._trim()
                 self.cv.notify_all()

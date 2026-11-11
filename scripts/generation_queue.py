@@ -1,6 +1,5 @@
 """Narrow adapter for Forge Neo's txt2img events (Gradio 4.40)."""
 
-import hashlib
 import inspect
 import json
 import re
@@ -12,13 +11,15 @@ import gradio as gr
 from modules import script_callbacks, shared
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from forge_generation_queue.queue import GenerationQueue, HoldQueue
+from forge_generation_queue.queue import GenerationQueue
 from forge_generation_queue.i18n import translate
+from forge_generation_queue.snapshot import install_job_settings
 
 OPTION = "forge_generation_queue_enabled"
 TOKEN = re.compile(r"^[a-f0-9]{32}$")
 ui = {}
 manager = None
+job_settings = None
 
 
 def settings():
@@ -65,20 +66,6 @@ def after_component(component, **kwargs):
         build_panel()
 
 
-def fingerprint():
-    # Conservative guard: common Settings changes pause the next reservation, never
-    # restore the entire global configuration behind the user's back.
-    ignored = {OPTION, "sd_checkpoint_hash", "quicksettings_list"}
-    config_path = getattr(shared, "config_filename", None)
-    # Native per-job Override settings temporarily alter opts.data. Compare the
-    # saved user configuration so another job cannot capture those temporary values.
-    data = json.loads(Path(config_path).read_text(encoding="utf-8")) if config_path else shared.opts.data.copy()
-    values = {k: v for k, v in data.items() if k not in ignored}
-    styles = getattr(getattr(shared, "prompt_styles", None), "styles", {})
-    raw = json.dumps([values, styles], ensure_ascii=False, sort_keys=True, default=str)
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
 def owner_for(token, request):
     if not isinstance(token, str) or not TOKEN.fullmatch(token):
         raise ValueError("Invalid client ID. Reload the page.")
@@ -92,15 +79,6 @@ def execute(job, engine):
     # Reuse the native GPU lock and native txt2img entry point. Keep ALL state
     # cleanup inside the lock so a following img2img/API job cannot be reset.
     with call_queue.queue_lock:
-        if job.state == "cancelled":
-            return None
-        try:
-            current_fingerprint = fingerprint()
-        except (OSError, ValueError):
-            raise HoldQueue("Cannot read shared settings. Resume after settings have finished saving.") from None
-        if current_fingerprint != job.fingerprint:
-            raise HoldQueue("Model or shared settings have changed since this job was queued. Restore them and resume, or cancel the job with ×.")
-
         def begin():
             shared.state.begin(job=job.id)
             progress.start_task(job.id)
@@ -111,7 +89,13 @@ def execute(job, engine):
 
         def generate():
             try:
-                result = txt2img.txt2img(job.id, job.context, *job.args)
+                # ContextVars must be activated ON Forge's generation thread,
+                # not on this FIFO worker (run_and_wait_result crosses threads).
+                def run():
+                    with job_settings.activate(job.settings):
+                        return txt2img.txt2img_function(job.id, job.context, *job.args)
+
+                result = main_thread.run_and_wait_result(run)
                 if result is None:
                     raise RuntimeError(main_thread.last_exception or "Could not retrieve the generation result.")
                 return result
@@ -123,11 +107,11 @@ def execute(job, engine):
             result = call_queue.wrap_gradio_call_no_job(
                 generate, extra_outputs=[None, None, "", ""], add_stats=True,
             )()
-            if failure:
-                raise RuntimeError(str(failure[0]))
             # External Interrupt follows the same cancellation state as the row's ×.
             if shared.state.interrupted or shared.state.stopping_generation:
                 job.cancel_requested = True
+            if failure:
+                raise failure[0]
             progress.record_results(job.id, result)
             return result
         finally:
@@ -148,7 +132,7 @@ def interrupt(job):
 
 
 def install(demo, app):
-    global manager
+    global manager, job_settings
     if demo is None or "poll" not in ui or getattr(demo, "_forge_queue_installed", False):
         return
     from modules import txt2img
@@ -161,12 +145,24 @@ def install(demo, app):
     if not candidates or len(poll_events) != 1 or any(len(fn.outputs) != 5 or fn.js != "submit" for fn in candidates):
         print("[Generation Queue] Unsupported txt2img event contract; native Generate unchanged.")
         return
+    model_ids = ("setting_sd_model_checkpoint", "setting_sd_modules", "forge_ui_dtype")
+    components = {getattr(block, "elem_id", None): block for block in demo.blocks.values()}
+    if any(key not in components for key in model_ids):
+        print("[Generation Queue] Model selection inputs unavailable; native Generate unchanged.")
+        return
+    from modules import sd_models
+    from modules_forge import main_entry
+    job_settings = install_job_settings(shared, main_entry, sd_models)
+    creator = getattr(txt2img, "txt2img_create_processing", None)
+    parameters = list(inspect.signature(creator).parameters) if creator else []
+    override_index = parameters.index("override_settings_texts") - 2 if "override_settings_texts" in parameters else None
     manager = GenerationQueue(execute, interrupt)
     engine = manager
 
     def route(original):
         @wraps(original)
         def routed(id_task, request: gr.Request, *args):
+            args, selection = args[:-3], args[-3:]
             if not isinstance(id_task, str) or not id_task.startswith("fq:"):
                 if engine.has_work():
                     gr.Warning(translate("Wait for the accepted queue jobs to finish."))
@@ -179,9 +175,12 @@ def install(demo, app):
                 owner = owner_for(token, request)
                 if not TOKEN.fullmatch(nonce):
                     raise ValueError("Invalid job ID.")
-                if engine.has_work() and engine.paused:
-                    raise ValueError("The queue is paused. Resume it or cancel pending jobs.")
-                engine.enqueue(f"task(fq-{nonce})", owner, args, request, fingerprint())
+                overrides = None
+                if override_index is not None:
+                    from modules.infotext_utils import create_override_settings_dict
+                    overrides = create_override_settings_dict(args[override_index])
+                snapshot = job_settings.capture(selection, overrides)
+                engine.enqueue(f"task(fq-{nonce})", owner, args, request, snapshot)
             except (ValueError, TypeError, OSError) as exc:
                 gr.Warning(translate(str(exc)))
             return tuple(gr.skip() for _ in range(5))
@@ -194,15 +193,12 @@ def install(demo, app):
             command = data.get("command", "")
             message = ""
             try:
-                if command == "resume":
-                    engine.resume(owner)
-                elif command.startswith("cancel:"):
+                if command.startswith("cancel:"):
                     if not engine.cancel(owner, command[7:]):
                         message = "Job not found."
             except ValueError as exc:
                 message = str(exc)
             state, result = engine.snapshot(owner, int(data.get("ack", 0)))
-            state["paused"] = translate(state["paused"])
             for row in state["rows"]:
                 row["error"] = translate(row["error"])
             state.update(enabled=bool(getattr(shared.opts, OPTION, False)),
@@ -215,8 +211,10 @@ def install(demo, app):
     poll_events[0].fn = poll
     poll_events[0].outputs = [ui["status"], *candidates[0].outputs]
     for fn in candidates:
+        input_count = len(fn.inputs)
+        fn.inputs = [*fn.inputs, *(components[key] for key in model_ids)]
         fn.fn = route(fn.fn)
-        fn.js = "(...args) => window.forgeGenerationQueue.submit(...args)"
+        fn.js = f"(...args) => window.forgeGenerationQueue.submitSnapshot({input_count}, ...args)"
         fn.trigger_mode = "multiple"
         fn.concurrency_limit = 1
         fn.concurrency_id = "forge_generation_queue_submit"

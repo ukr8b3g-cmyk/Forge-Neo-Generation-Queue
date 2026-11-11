@@ -68,54 +68,48 @@
         // Status polling also marks result outputs pending, even when they are skipped.
         el("html_info_txt2img")?.classList.toggle("fq-stable-info", enabled() || state.busy || state.result_seq > 0);
         const running = active.find(row => row.state === "running");
-        const newest = (state.rows || []).reduce((last, row) => !last || row.number > last.number ? row : last, null);
-        const latestFailure = newest?.state === "failed" ? newest.error : "";
+        const failed = (state.rows || []).filter(row => row.state === "failed").at(-1);
+        const failureLabel = failed ? t(`Failed #${failed.number}`, `失敗 #${failed.number}`) : "";
         box.classList.toggle("fq-generating", !!running);
         const loadingOptions = optionsWaiters.size > 0;
         const connecting = !state.ready && enabled() && !sending;
         box.classList.toggle("fq-submitting", !running && (sending || connecting || loadingOptions));
         el("txt2img_generate")?.setAttribute("aria-busy", running || sending || connecting || loadingOptions ? "true" : "false");
-        const visible = ownBusy || sending || state.paused || state.can_resume || error || connectionError || latestFailure || connecting || loadingOptions;
+        const visible = ownBusy || sending || failed || error || connectionError || connecting || loadingOptions;
         panel.style.setProperty("display", visible ? "flex" : "none", "important");
         const content = el("fq_content");
-        const view = JSON.stringify([state.rows, state.paused, state.can_resume, state.ready, enabled(), error, connectionError, japanese(), sending, connecting, loadingOptions]);
+        const view = JSON.stringify([state.rows, state.ready, enabled(), error, connectionError, japanese(), sending, connecting, loadingOptions]);
         if (!content || lastView === view) return;
         lastView = view;
-        const expanded = ownBusy && (content.querySelector("details")?.open || false);
+        const expanded = (ownBusy || failed) && (content.querySelector("details")?.open || false);
         content.replaceChildren();
         if (!visible) return;
         const details = document.createElement("details");
         details.open = expanded;
         const heading = document.createElement("summary");
         heading.className = "fq-heading";
-        if (running && !state.paused) {
+        if (running) {
             heading.classList.add("fq-heading-running");
             heading.dataset.taskId = running.id;
         }
-        const status = state.paused ? t("Paused", "停止中") : running ?
+        const status = running ?
             running.cancelling ? t("Interrupting", "中断中") : t("Generating", "生成中") :
             sending ? t("Sending…", "送信中…") : loadingOptions ? t("Loading settings…", "設定読込中…") :
-                connecting ? t("Connecting…", "接続中…") : "";
+                connecting ? t("Connecting…", "接続中…") :
+                    ownBusy ? "" : failureLabel;
         heading.textContent = [status, ownBusy ? t(`Remaining: ${active.length}`, `残り ${active.length}件`) : "",
             ownBusy && sending && running ? t("Sending…", "送信中…") : ""].filter(Boolean).join(" · ");
-        heading.title = t("Click to view or cancel individual jobs", "クリックで予約の詳細・個別取消");
+        heading.title = ownBusy ? t("Click to view or cancel individual jobs", "クリックで予約の詳細・個別取消") :
+            failed ? t("Click to view the generation error", "クリックで生成エラーの詳細を表示") : "";
         details.append(heading);
         content.append(details);
-        if (error || connectionError || state.paused || latestFailure) {
+        if (error || connectionError || (ownBusy && failed)) {
             const notice = document.createElement("div");
             notice.className = "fq-notice";
-            notice.textContent = connectionError ? t("Reconnecting…", "再接続中…") : t("Check queue", "要確認");
-            const failed = (state.rows || []).filter(row => row.state === "failed").at(-1);
-            notice.title = [connectionError, error || state.paused, latestFailure || (state.paused && failed?.error)].filter(Boolean).join("\n");
+            notice.textContent = connectionError ? t("Reconnecting…", "再接続中…") :
+                error ? t("Check queue", "要確認") : failureLabel;
+            notice.title = [connectionError, error, failed?.error].filter(Boolean).join("\n");
             content.append(notice);
-            if (state.can_resume) {
-                const resume = document.createElement("button");
-                resume.type = "button";
-                resume.className = "fq-resume";
-                resume.textContent = t("Resume", "再開");
-                resume.onclick = () => command("resume");
-                content.append(resume);
-            }
         }
         const list = document.createElement("div");
         list.className = "fq-list";
@@ -147,6 +141,12 @@
                 line.append(cancel);
             }
             list.append(line);
+        }
+        if (failed) {
+            const failure = document.createElement("div");
+            failure.className = "fq-job-error";
+            failure.textContent = t(`Job #${failed.number} failed. ${failed.error}`, `予約 #${failed.number} の生成に失敗しました。 ${failed.error}`);
+            list.append(failure);
         }
         details.append(list);
         paintProgress();
@@ -206,6 +206,15 @@
         if (poll) { inFlight = Date.now(); poll.click(); }
     }
     window.forgeGenerationQueue = {
+        submitSnapshot(inputCount, ...args) {
+            // Added Gradio inputs precede the five output values. Strip them
+            // before native submit's output trimming, then append copied values.
+            const selection = JSON.parse(JSON.stringify(args.slice(inputCount, inputCount + 3)));
+            const nativeArgs = [...args.slice(0, inputCount), ...args.slice(inputCount + 3)];
+            const append = values => [...values.slice(0, inputCount), ...selection];
+            const result = this.submit(...nativeArgs);
+            return result && typeof result.then === "function" ? result.then(append) : append(result);
+        },
         submit(...args) {
             // The installed Generate event already routes to the queue server.
             // Only local options may need to finish loading; status is independent.

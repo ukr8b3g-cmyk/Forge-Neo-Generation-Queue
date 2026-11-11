@@ -1,5 +1,15 @@
 # Changelog / 変更履歴
 
+## 0.2.0 — 2026-11-12
+
+- Snapshot each job's checkpoint, VAE / text encoders, storage type, option values and style definitions. Changing the UI model/settings affects new submissions only. Scope settings on Forge's generation thread without overwriting current UI preferences; use the native model-loading path.
+- Run accepted jobs in order through Forge's existing GPU lock. Changes to shared settings and style definitions no longer pause the queue or require a Resume action.
+- Record a generation error on the affected job and continue with the next job. Recent error details remain available in the queue panel.
+
+日本語：共通設定・スタイル定義の変更で停止する判定とResumeを削除。生成に失敗した1件の理由を表示し、後続の予約を順に実行します。
+
+追記：予約済みジョブはモデル・VAE／テキストエンコーダー・精度・設定値・スタイル定義も保持します。画面を変更しても旧予約を書き換えず、生成側の設定から現在の画面設定や保存ファイルを上書きしません。
+
 ## 2026-10-31 — Idle connection recovery / 放置後の通信復旧
 
 - Handle both successful and failed Gradio status requests so failed requests cannot leave the client permanently busy. Validate reply IDs, retry completed failures with 1.5–15 second backoff, and preserve one in-flight status request.
