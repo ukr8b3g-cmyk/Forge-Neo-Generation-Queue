@@ -1,4 +1,4 @@
-"""Narrow adapter for Forge Neo's txt2img events (Gradio 4.40)."""
+"""Connect the queue to the native txt2img events of Forge Neo and reForge."""
 
 import inspect
 import json
@@ -13,13 +13,14 @@ from modules import script_callbacks, shared
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from forge_generation_queue.queue import GenerationQueue
 from forge_generation_queue.i18n import translate
-from forge_generation_queue.snapshot import install_job_settings
+from forge_generation_queue.snapshot import ReForgeJobSettings, install_job_settings
 
 OPTION = "forge_generation_queue_enabled"
 TOKEN = re.compile(r"^[a-f0-9]{32}$")
 ui = {}
 manager = None
 job_settings = None
+legacy_gradio = gr.__version__.split(".", 1)[0] == "3"
 
 
 def settings():
@@ -50,14 +51,23 @@ def build_panel():
         # Register events during UI construction. Re-entering `with demo` after
         # launch would recreate Gradio's app object and its authentication state.
         # One status handler for Gradio's reliable initial load and later polls.
-        status_event = gr.on(triggers=[gr.context.Context.root_block.load, ui["poll"].click],
-              fn=poll_pending, inputs=[ui["request"]], outputs=[ui["status"]],
-              js="() => [window.forgeGenerationQueue.pollArgs()]",
-              queue=False, trigger_mode="multiple", show_progress="hidden", api_name=False)
+        demo = gr.context.Context.root_block
+        poll_args = dict(fn=poll_pending, inputs=[ui["request"]], outputs=[ui["status"]],
+                         queue=False, show_progress="hidden", api_name=False)
+        poll_js = "() => [window.forgeGenerationQueue.pollArgs()]"
+        done_js = "value => {window.forgeGenerationQueue.pollFinished(value); return [];}"
+        if legacy_gradio:
+            for bind in (demo.load, ui["poll"].click):
+                bind(**poll_args, _js=poll_js).then(
+                    fn=None, inputs=[ui["status"]], _js=done_js,
+                    queue=False, show_progress="hidden")
+            return
+        status_event = gr.on(triggers=[demo.load, ui["poll"].click],
+                             **poll_args, js=poll_js, trigger_mode="multiple")
         # .then runs after both success and transport/backend failure. A textbox
         # change alone never reports failed requests, leaving the client locked.
         status_event.then(fn=None, inputs=[ui["status"]],
-                             js="value => {window.forgeGenerationQueue.pollFinished(value); return [];}",
+                             js=done_js,
                              queue=False, show_progress="hidden")
 
 
@@ -97,16 +107,15 @@ def execute(job, engine):
 
                 result = main_thread.run_and_wait_result(run)
                 if result is None:
-                    raise RuntimeError(main_thread.last_exception or "Could not retrieve the generation result.")
+                    raise RuntimeError(getattr(main_thread, "last_exception", None) or "Could not retrieve the generation result.")
                 return result
             except Exception as exc:
                 failure.append(exc)
                 raise
 
         try:
-            result = call_queue.wrap_gradio_call_no_job(
-                generate, extra_outputs=[None, None, "", ""], add_stats=True,
-            )()
+            extra_outputs = [None, "", ""] if legacy_gradio else [None, None, "", ""]
+            result = call_queue.wrap_gradio_call_no_job(generate, extra_outputs=extra_outputs, add_stats=True)()
             # External Interrupt follows the same cancellation state as the row's ×.
             if shared.state.interrupted or shared.state.stopping_generation:
                 job.cancel_requested = True
@@ -120,8 +129,9 @@ def execute(job, engine):
             shared.state.skipped = False
             shared.state.interrupted = False
             shared.state.stopping_generation = False
-            from modules.ui import cleanup
-            cleanup()
+            if not legacy_gradio:
+                from modules.ui import cleanup
+                cleanup()
 
 
 def interrupt(job):
@@ -135,24 +145,40 @@ def install(demo, app):
     global manager, job_settings
     if demo is None or "poll" not in ui or getattr(demo, "_forge_queue_installed", False):
         return
-    from modules import txt2img
+    from modules import sd_models, txt2img
 
-    candidates = [fn for fn in demo.fns.values() if fn.fn is not None
+    if legacy_gradio:
+        events = list(zip(demo.fns, demo.dependencies, strict=True))
+    else:
+        events = [(fn, None) for fn in demo.fns.values()]
+    candidates = [(fn, dep) for fn, dep in events if fn.fn is not None
                   and inspect.unwrap(fn.fn) is txt2img.txt2img]
-    poll_events = [fn for fn in demo.fns.values() if fn.fn is poll_pending]
+    poll_events = [(fn, dep) for fn, dep in events if fn.fn is poll_pending]
+    output_count = 4 if legacy_gradio else 5
     # Fail closed if Forge changes the event contract. Do not guess input offsets
     # or replace unrelated functions (upscale/img2img/extensions remain untouched).
-    if not candidates or len(poll_events) != 1 or any(len(fn.outputs) != 5 or fn.js != "submit" for fn in candidates):
+    if (not candidates or len(poll_events) != (2 if legacy_gradio else 1)
+            or any(len(fn.outputs) != output_count or (dep["js"] if dep else fn.js) != "submit"
+                   for fn, dep in candidates)):
         print("[Generation Queue] Unsupported txt2img event contract; native Generate unchanged.")
         return
-    model_ids = ("setting_sd_model_checkpoint", "setting_sd_modules", "forge_ui_dtype")
     components = {getattr(block, "elem_id", None): block for block in demo.blocks.values()}
-    if any(key not in components for key in model_ids):
-        print("[Generation Queue] Model selection inputs unavailable; native Generate unchanged.")
-        return
-    from modules import sd_models
-    from modules_forge import main_entry
-    job_settings = install_job_settings(shared, main_entry, sd_models)
+    if legacy_gradio:
+        from modules import sd_vae
+        # Quicksettings apply on change. Values on the Settings tab are drafts
+        # until Apply; capture those from server options instead.
+        quicksettings = shared.opts.quicksettings_list if not shared.cmd_opts.freeze_settings else ()
+        selection_keys = tuple(key for key in ReForgeJobSettings.model_options
+                               if key in quicksettings and f"setting_{key}" in components)
+        model_ids = tuple(f"setting_{key}" for key in selection_keys)
+        job_settings = ReForgeJobSettings(shared, sd_models, sd_vae, selection_keys)
+    else:
+        model_ids = ("setting_sd_model_checkpoint", "setting_sd_modules", "forge_ui_dtype")
+        if any(key not in components for key in model_ids):
+            print("[Generation Queue] Model selection inputs unavailable; native Generate unchanged.")
+            return
+        from modules_forge import main_entry
+        job_settings = install_job_settings(shared, main_entry, sd_models)
     creator = getattr(txt2img, "txt2img_create_processing", None)
     parameters = list(inspect.signature(creator).parameters) if creator else []
     override_index = parameters.index("override_settings_texts") - 2 if "override_settings_texts" in parameters else None
@@ -162,11 +188,12 @@ def install(demo, app):
     def route(original):
         @wraps(original)
         def routed(id_task, request: gr.Request, *args):
-            args, selection = args[:-3], args[-3:]
+            native_count = len(args) - len(model_ids)
+            args, selection = args[:native_count], args[native_count:]
             if not isinstance(id_task, str) or not id_task.startswith("fq:"):
                 if engine.has_work():
                     gr.Warning(translate("Wait for the accepted queue jobs to finish."))
-                    return tuple(gr.skip() for _ in range(5))
+                    return tuple(gr.skip() for _ in range(output_count))
                 return original(id_task, request, *args)
             try:
                 if not getattr(shared.opts, OPTION, False):
@@ -183,7 +210,7 @@ def install(demo, app):
                 engine.enqueue(f"task(fq-{nonce})", owner, args, request, snapshot)
             except (ValueError, TypeError, OSError) as exc:
                 gr.Warning(translate(str(exc)))
-            return tuple(gr.skip() for _ in range(5))
+            return tuple(gr.skip() for _ in range(output_count))
         return routed
 
     def poll(payload, request: gr.Request):
@@ -204,30 +231,39 @@ def install(demo, app):
             state.update(enabled=bool(getattr(shared.opts, OPTION, False)),
                          command_id=data.get("command_id"), poll_id=data.get("poll_id"), message=translate(message), ready=True)
             return (json.dumps(state, ensure_ascii=False), *(result if result is not None else
-                    [gr.skip() for _ in range(5)]))
+                    [gr.skip() for _ in range(output_count)]))
         except (ValueError, TypeError, AttributeError) as exc:
-            return (json.dumps(dict(ready=True, message=translate(str(exc)))), *[gr.skip() for _ in range(5)])
+            return (json.dumps(dict(ready=True, message=translate(str(exc)))), *[gr.skip() for _ in range(output_count)])
 
-    poll_events[0].fn = poll
-    poll_events[0].outputs = [ui["status"], *candidates[0].outputs]
-    for fn in candidates:
+    for fn, dep in poll_events:
+        fn.fn = poll
+        fn.outputs = [ui["status"], *candidates[0][0].outputs]
+        if dep is not None:
+            dep["outputs"] = [block._id for block in fn.outputs]
+    for fn, dep in candidates:
         input_count = len(fn.inputs)
         fn.inputs = [*fn.inputs, *(components[key] for key in model_ids)]
         fn.fn = route(fn.fn)
+        if dep is not None:
+            dep["inputs"] = [block._id for block in fn.inputs]
+            dep["js"] = (
+                f"(...args) => window.forgeGenerationQueue.submitWithSelection({input_count}, {len(model_ids)}, args)")
+            continue
         fn.js = f"(...args) => window.forgeGenerationQueue.submitSnapshot({input_count}, ...args)"
         fn.trigger_mode = "multiple"
         fn.concurrency_limit = 1
         fn.concurrency_id = "forge_generation_queue_submit"
     # Native .then(cleanup) must not unload a previous OOM's model while an
     # accepted reservation is starting. The worker runs cleanup under the lock.
-    from modules.ui import cleanup
-    candidate_ids = {fn._id for fn in candidates}
-    for fn in demo.fns.values():
-        if fn.trigger_after in candidate_ids and fn.fn is cleanup:
-            def after_submit():
-                if not engine.has_work():
-                    cleanup()
-            fn.fn = after_submit
+    if not legacy_gradio:
+        from modules.ui import cleanup
+        candidate_ids = {fn._id for fn, _ in candidates}
+        for fn in demo.fns.values():
+            if fn.trigger_after in candidate_ids and fn.fn is cleanup:
+                def after_submit():
+                    if not engine.has_work():
+                        cleanup()
+                fn.fn = after_submit
     demo._forge_queue_installed = True
     demo.config = demo.get_config_file()
     print("[Generation Queue] txt2img connected; enable in Settings / Generation Queue.")

@@ -1,5 +1,13 @@
 # Changelog / 変更履歴
 
+## 0.3.0 — 2026-11-15
+
+- Add reForge support for the txt2img queue on Gradio 3. The green **Generate** button stays available while a job runs, so additional jobs can be queued.
+- Use reForge's native model loader and generation pipeline. Capture Quicksettings at submission and use the applied values for options on the Settings tab.
+- Verified click and Enter submissions, FIFO order, per-job settings, gallery results and native mode when the queue is OFF in an isolated Chrome test using Gradio 3.41.2 and a CPU simulation.
+
+日本語：reForge（Gradio 3）のtxt2imgに対応しました。生成中も緑の **Generate** から追加予約でき、受付順に実行します。予約時の設定保持とキューOFF時の標準動作を隔離Chromeの模擬生成で確認しました。
+
 ## 0.2.0 — 2026-11-12
 
 - Snapshot each job's checkpoint, VAE / text encoders, storage type, option values and style definitions. Changing the UI model/settings affects new submissions only. Scope settings on Forge's generation thread without overwriting current UI preferences; use the native model-loading path.

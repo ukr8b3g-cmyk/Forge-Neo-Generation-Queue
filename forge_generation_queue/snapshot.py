@@ -140,6 +140,69 @@ class JobSettings:
                 self._refresh_if_needed(restoring=True)
 
 
+class ReForgeJobSettings:
+    model_options = ("sd_model_checkpoint", "sd_vae", "sd_text_encoder", "fp8_storage")
+
+    def __init__(self, shared, sd_models, sd_vae, selection_keys):
+        self.shared = shared
+        self.models = sd_models
+        self.vae = sd_vae
+        self.selection_keys = selection_keys
+        self.options = scoped_attribute(shared.opts, "data")
+        self.styles = scoped_attribute(shared.prompt_styles, "styles")
+
+    def capture(self, selection, overrides=None):
+        data = deepcopy(self.shared.opts.data)
+        for name in (*self.model_options, "sd_vae_overrides_per_model_preferences"):
+            data.setdefault(name, getattr(self.shared.opts, name))
+        data.update(zip(self.selection_keys, selection, strict=True))
+        for name in self.model_options:
+            if name in (overrides or {}):
+                data[name] = overrides[name]
+        checkpoint = data["sd_model_checkpoint"]
+        info = self.models.checkpoint_aliases.get(checkpoint)
+        if info is None:
+            raise ValueError(f"Selected checkpoint not found: {checkpoint}")
+        data["sd_model_checkpoint"] = info.title
+        return dict(options=data, styles=deepcopy(self.shared.prompt_styles.styles),
+                    checkpoint_file=info.filename)
+
+    @contextmanager
+    def activate(self, snapshot):
+        live = self.shared.opts
+        data = deepcopy(snapshot["options"])
+        info = self.models.checkpoint_aliases.get(data["sd_model_checkpoint"])
+        if (info is None or info.filename != snapshot["checkpoint_file"]
+                or not Path(info.filename).is_file()):
+            raise FileNotFoundError("Queued checkpoint is no longer available: " + snapshot["checkpoint_file"])
+        queued_encoder = data["sd_text_encoder"]
+        queued_vae = (data["sd_vae"], data["sd_vae_overrides_per_model_preferences"])
+        live_vae = (live.sd_vae, live.sd_vae_overrides_per_model_preferences)
+        custom_encoder = queued_encoder != live.sd_text_encoder
+        custom_vae = queued_vae != live_vae
+        option_token = self.options.set(data)
+        style_token = self.styles.set(deepcopy(snapshot["styles"]))
+        try:
+            model = self.models.reload_model_weights(info=info, forced_reload=custom_encoder)
+            if model is None:
+                raise RuntimeError(f"Could not load queued checkpoint: {info.title}")
+            self.vae.reload_vae_weights(model)
+            yield
+        finally:
+            self.styles.reset(style_token)
+            self.options.reset(option_token)
+            if custom_encoder or custom_vae:
+                model_data = self.models.model_data
+                # A high-res pass can replace or evict the first-pass checkpoint.
+                cached = next((model for model in model_data.loaded_sd_models if model.filename == info.filename), None)
+                if cached is not None:
+                    if custom_encoder:
+                        self.models.reload_model_weights(info=info, forced_reload=True)
+                    else:
+                        model_data.set_sd_model(cached, already_loaded=True)
+                        self.vae.reload_vae_weights(cached)
+
+
 def install_job_settings(shared, main_entry, sd_models):
     # Retain one scope/refresh wrapper across Reload UI, including a draining job.
     if not hasattr(shared, "_forge_queue_job_settings"):

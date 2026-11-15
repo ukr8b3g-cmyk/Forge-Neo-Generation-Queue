@@ -207,10 +207,13 @@
     }
     window.forgeGenerationQueue = {
         submitSnapshot(inputCount, ...args) {
-            // Added Gradio inputs precede the five output values. Strip them
-            // before native submit's output trimming, then append copied values.
-            const selection = JSON.parse(JSON.stringify(args.slice(inputCount, inputCount + 3)));
-            const nativeArgs = [...args.slice(0, inputCount), ...args.slice(inputCount + 3)];
+            return this.submitWithSelection(inputCount, 3, args);
+        },
+        submitWithSelection(inputCount, selectionCount, args) {
+            // Remove the added inputs while native submit builds its argument list.
+            const end = inputCount + selectionCount;
+            const selection = JSON.parse(JSON.stringify(args.slice(inputCount, end)));
+            const nativeArgs = [...args.slice(0, inputCount), ...args.slice(end)];
             const append = values => [...values.slice(0, inputCount), ...selection];
             const result = this.submit(...nativeArgs);
             return result && typeof result.then === "function" ? result.then(append) : append(result);

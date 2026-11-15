@@ -1,5 +1,7 @@
 # Testing
 
+reForge (Gradio 3.41.2): an isolated Chrome test used the installed Gradio, native queue lock and generation thread, and a CPU-only generator. It verified that green Generate stays clickable during execution, multiple clicks and prompt Enter are processed in FIFO order, checkpoint/VAE/FP8 choices are captured per job, unapplied Settings edits do not affect reservations, the gallery receives the result, and OFF resumes the native action. The Forge Neo suite passed 27 Python checks, 28 Node checks and seven isolated browser scenarios. Live WebUI generation and GPU model loading were not tested.
+
 Idle recovery: 25 portable Node checks pass, including failed requests, stale textbox data, malformed replies, bounded backoff and OFF/result acknowledgement recovery. The former timeout test now requires manual Generate to remain usable. An installed-Gradio 4.40 CPU/browser test aborts a status HTTP request, verifies automatic retry, holds the next response for 16 seconds, submits one job, then confirms result delivery and OFF polling shutdown. Maximum concurrent status requests: one; generation submissions: one; browser exceptions: zero. Real GPU and PC sleep/resume remain untested.
 
 Standalone FIFO tests require only Python's standard library:

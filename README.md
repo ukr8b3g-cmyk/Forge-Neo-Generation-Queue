@@ -2,7 +2,7 @@
 
 [日本語 README](README.ja.md)
 
-Queue **txt2img** jobs with Forge Neo's existing **Generate** button. Prepare the next prompt while the current job is running.
+Queue **txt2img** jobs with the existing **Generate** button in **Forge Neo** or **reForge**. Prepare and submit the next prompt while the current job is running.
 
 - One click adds one job; jobs run sequentially through Forge's existing pipeline.
 - Generate turns **dark green during generation**, then returns to its normal color.
@@ -19,31 +19,31 @@ Choose either method below. **Install from URL does not require the extension to
 
 ### Install from URL
 
-1. Open **Extensions → Install from URL** in Forge Neo.
+1. Open **Extensions → Install from URL** in your WebUI.
 2. Enter `https://github.com/ukr8b3g-cmyk/Forge-Neo-Generation-Queue.git` and click **Install**.
-3. Restart Forge Neo with your usual launcher and reload the browser.
+3. Restart the WebUI with your usual launcher and reload the browser.
 
 ### Git clone
 
-Git is required. Open a terminal in your **Forge Neo installation folder** and run:
+Git is required. Open a terminal in your **Forge Neo or reForge installation folder** and run:
 
 ```sh
 git clone https://github.com/ukr8b3g-cmyk/Forge-Neo-Generation-Queue.git extensions/Forge-Neo-Generation-Queue
 ```
 
-Restart Forge Neo with your usual launcher and reload the browser. No additional Python packages are required. Do not clone a second copy if the extension is already installed.
+Restart the WebUI with your usual launcher and reload the browser. No additional Python packages are required. Do not clone a second copy if the extension is already installed.
 
 ## Update
 
-After the queue has finished, stop Forge Neo. From the **Forge Neo installation folder**, run:
+After the queue has finished, stop the WebUI. From its **installation folder**, run:
 
 ```sh
 git -C extensions/Forge-Neo-Generation-Queue pull --ff-only
 ```
 
-Restart Forge Neo and reload the browser. If Git reports local changes or diverging history, preserve those changes and resolve them before updating; do not force a reset.
+Restart the WebUI and reload the browser. If Git reports local changes or diverging history, preserve those changes and resolve them before updating; do not force a reset.
 
-If colors, spacing, or labels still look old, restart Forge Neo after the queue is empty, then use **Ctrl+F5** to reload without the browser cache. An ordinary page refresh can retain older CSS or JavaScript. Reloading only the browser does not apply Python changes.
+If colors, spacing, or labels still look old, restart the WebUI after the queue is empty, then use **Ctrl+F5** to reload without the browser cache. An ordinary page refresh can retain older CSS or JavaScript. Reloading only the browser does not apply Python changes.
 
 These commands require a Git clone. A ZIP or manually copied installation without a `.git` directory cannot use `git pull`. Move that copy outside `extensions` as a backup, then use the installation command above. Keep only one enabled copy.
 
@@ -113,7 +113,7 @@ The limit is **32 running and pending jobs combined**, across the instance. Turn
 
 Failed status requests show **Reconnecting…** and retry with backoff from 1.5 seconds up to 15 seconds. Status connection errors no longer block manual Generate. Requests still in flight are allowed to finish without overlap. Only status requests are retried; generation requests are never replayed automatically. If Forge or the network is unavailable, wait for it to recover; a click alone does not confirm that a job was accepted.
 
-After installing this fix, let accepted jobs finish, restart Forge Neo, and refresh the browser with **Ctrl+F5**.
+After updating, let accepted jobs finish, restart the WebUI, and refresh the browser with **Ctrl+F5**.
 
 - **txt2img only.** img2img, standalone Hires, API generation, and other extensions' buttons retain their original entry points.
 - Inputs are copied when accepted. Seed `-1`, Dynamic Prompts, and similar expansion use the normal generation pipeline. Expanded random prompts and external wildcard files are not frozen when submitted.
@@ -127,13 +127,18 @@ After installing this fix, let accepted jobs finish, restart Forge Neo, and refr
 
 ## Compatibility and verification
 
-Version **0.2.0** was developed against Forge Neo commit `2900d5948a17ec993075fb810a695ce4f674bd0c`, Gradio **4.40.0**. Other versions have not been verified. If the txt2img event contract differs, the extension logs a warning and leaves the native Generate event unchanged.
+Version **0.3.0** was tested with these WebUI event interfaces:
+
+- **Forge Neo** `2900d5948a17ec993075fb810a695ce4f674bd0c` with Gradio **4.40.0**.
+- **reForge** `739b2e1d` with Gradio **3.41.2**. Changes on the Settings tab take effect for new reservations after **Apply settings**.
+
+If the txt2img event contract differs, the extension logs a warning and leaves the native Generate event unchanged.
 
 Forge's source files are not edited. Its existing txt2img generation pipeline and GPU lock are used. Automated checks cover ordering, cancellation, input copies, locale selection, Gradio integration, and compact UI behavior. Isolated browser generation uses a CPU simulation and **does not establish real Forge/GPU acceptance**. Settings and expanded queue screenshots are user-supplied WebUI captures; the idle/generating examples use sample jobs. See [testing notes](TESTING.md).
 
 ## Disable
 
-Remove the Quicksettings entry if added, disable the extension under **Extensions**, and restart Forge Neo. Existing workflows and generation settings are not rewritten.
+Remove the Quicksettings entry if added, disable the extension under **Extensions**, and restart the WebUI. Existing workflows and generation settings are not rewritten.
 
 ## Project information
 
