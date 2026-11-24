@@ -1,5 +1,10 @@
 # Changelog / 変更履歴
 
+## 0.4.0 — 2026-11-25
+
+- Add an **×** at the right edge of **Generate** while a queued job is running. It interrupts that job and leaves later reservations in order. The main button stays available for new submissions.
+- 生成中は **Generate** の右端に **×** が表示されます。押すと実行中の1件だけを中断し、次の予約に進みます。中央の **Generate** から引き続き予約を追加できます。
+
 ## 0.3.0 — 2026-11-15
 
 - Add reForge support for the txt2img queue on Gradio 3. The green **Generate** button stays available while a job runs, so additional jobs can be queued.

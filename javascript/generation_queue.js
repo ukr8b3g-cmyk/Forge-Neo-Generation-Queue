@@ -42,6 +42,41 @@
         commands.push({command: value, command_id: uuid()});
         tick();
     }
+    function cancelQueued(id) {
+        return commands.some(entry => entry.command === "cancel:" + id);
+    }
+    function cancelButton(row) {
+        const button = document.createElement("button");
+        const running = row.state === "running";
+        button.type = "button";
+        button.textContent = "×";
+        button.lang = japanese() ? "ja" : "en";
+        button.dataset.taskId = row.id;
+        button.setAttribute("aria-label", running ? t(`Interrupt job #${row.number}`, `予約 #${row.number} を中断`) : t(`Cancel job #${row.number}`, `予約 #${row.number} を取り消し`));
+        button.title = running ? t("Interrupt this generation and continue to the next job", "現在の生成を中断し、次の予約へ進む") : t("Cancel this pending job", "この予約を取り消す");
+        button.disabled = row.cancelling || cancelQueued(row.id);
+        button.onclick = () => {
+            if (!button.disabled && !cancelQueued(row.id)) command("cancel:" + row.id);
+        };
+        return button;
+    }
+    function paintCurrentInterrupt(generate, running) {
+        let button = el("fq_interrupt_current");
+        if (button && (!running || button.dataset.taskId !== running.id ||
+                button.lang !== (japanese() ? "ja" : "en") || button.previousElementSibling !== generate)) {
+            // A click started on the previous job must never target its successor.
+            button.remove();
+            button = null;
+        }
+        if (!generate || !running) return;
+        if (!button) {
+            button = cancelButton(running);
+            button.id = "fq_interrupt_current";
+            generate.after(button);
+        } else {
+            button.disabled = running.cancelling || cancelQueued(running.id);
+        }
+    }
     function paintProgress() {
         const content = el("fq_content");
         const heading = content?.querySelector(".fq-heading-running");
@@ -74,11 +109,13 @@
         const loadingOptions = optionsWaiters.size > 0;
         const connecting = !state.ready && enabled() && !sending;
         box.classList.toggle("fq-submitting", !running && (sending || connecting || loadingOptions));
-        el("txt2img_generate")?.setAttribute("aria-busy", running || sending || connecting || loadingOptions ? "true" : "false");
+        const generate = el("txt2img_generate");
+        generate?.setAttribute("aria-busy", running || sending || connecting || loadingOptions ? "true" : "false");
+        paintCurrentInterrupt(generate, mode && running);
         const visible = ownBusy || sending || failed || error || connectionError || connecting || loadingOptions;
         panel.style.setProperty("display", visible ? "flex" : "none", "important");
         const content = el("fq_content");
-        const view = JSON.stringify([state.rows, state.ready, enabled(), error, connectionError, japanese(), sending, connecting, loadingOptions]);
+        const view = JSON.stringify([state.rows, state.ready, enabled(), error, connectionError, japanese(), sending, connecting, loadingOptions, commands]);
         if (!content || lastView === view) return;
         lastView = view;
         const expanded = (ownBusy || failed) && (content.querySelector("details")?.open || false);
@@ -130,16 +167,7 @@
             label.textContent = `${row.cancelling ? t("Interrupt requested", "中断要求中") : labels[row.state] ? t(...labels[row.state]) : row.state} #${row.number}  ${row.label}`;
             label.title = row.error || row.label;
             line.append(label);
-            if (["pending", "waiting", "running"].includes(row.state)) {
-                const cancel = document.createElement("button");
-                cancel.type = "button";
-                cancel.textContent = "×";
-                cancel.setAttribute("aria-label", row.state === "running" ? t(`Interrupt job #${row.number}`, `予約 #${row.number} を中断`) : t(`Cancel job #${row.number}`, `予約 #${row.number} を取り消し`));
-                cancel.title = row.state === "running" ? t("Interrupt this generation and continue to the next job", "現在の生成を中断し、次の予約へ進む") : t("Cancel this pending job", "この予約を取り消す");
-                cancel.disabled = row.cancelling;
-                cancel.onclick = () => { cancel.disabled = true; command("cancel:" + row.id); };
-                line.append(cancel);
-            }
+            line.append(cancelButton(row));
             list.append(line);
         }
         if (failed) {

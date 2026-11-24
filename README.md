@@ -94,7 +94,7 @@ The expanded queue screenshot was provided by the user from WebUI. The two idle/
 
 ### Cancel or interrupt with ×
 
-**Queue mode uses the × in each detail row for cancellation and interruption; there is no separate Cancel button.**
+While a job is running, click **×** at the right edge of **Generate** to interrupt that job. The next reservation starts when the interruption finishes. Click **Generate** to add another job, even while the queue is running. You can also cancel individual jobs in the details below.
 
 1. Click **Remaining: N** below Generate to open the details.
 2. Find the job you want to stop.
