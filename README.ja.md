@@ -2,7 +2,7 @@
 
 [English README](README.md)
 
-v0.4.0。**Forge Neo** と **reForge** の **txt2img** で、既存のGenerateを押すたびに生成を予約できます。生成中も緑のGenerateから追加予約できます。初期設定はOFFです。
+v0.4.1。**Forge Neo** と **reForge** の **txt2img** で、既存のGenerateを押すたびに生成を予約できます。生成中も緑のGenerateから追加予約できます。初期設定はOFFです。
 
 ## インストール
 
