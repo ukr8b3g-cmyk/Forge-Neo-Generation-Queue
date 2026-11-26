@@ -89,6 +89,7 @@ class GenerationQueue:
                 return False
             begin()
             job.state = "running"
+            self.cv.notify_all()
             return True
 
     def cancel(self, owner, job_id):
@@ -108,8 +109,14 @@ class GenerationQueue:
             self.cv.notify_all()
             return True
 
-    def snapshot(self, owner, acknowledged=0):
+    def snapshot(self, owner, acknowledged=0, *, wait_for=None):
         with self.cv:
+            job = self.jobs.get(wait_for) if isinstance(wait_for, str) else None
+            if (job is not None and job.owner == owner and job.state in ACTIVE
+                    and not job.cancel_requested and not self.closed
+                    and self.latest.get(owner, (0,))[0] <= acknowledged):
+                # A queue change, including a finished image, can answer this poll early.
+                self.cv.wait(timeout=0.75)
             own = [j for j in self.jobs.values() if j.owner == owner]
             active = [j for j in own if j.state in ("pending", "waiting", "running")]
             history = [j for j in own if j.state not in ("pending", "waiting", "running")][-4:]

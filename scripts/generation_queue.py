@@ -225,11 +225,13 @@ def install(demo, app):
                         message = "Job not found."
             except ValueError as exc:
                 message = str(exc)
-            state, result = engine.snapshot(owner, int(data.get("ack", 0)))
+            wait_for = data.get("wait_for") if not command else None
+            state, result = engine.snapshot(owner, int(data.get("ack", 0)), wait_for=wait_for)
             for row in state["rows"]:
                 row["error"] = translate(row["error"])
             state.update(enabled=bool(getattr(shared.opts, OPTION, False)),
-                         command_id=data.get("command_id"), poll_id=data.get("poll_id"), message=translate(message), ready=True)
+                         command_id=data.get("command_id"), poll_id=data.get("poll_id"), message=translate(message),
+                         ready=True, supports_result_wait=True)
             return (json.dumps(state, ensure_ascii=False), *(result if result is not None else
                     [gr.skip() for _ in range(output_count)]))
         except (ValueError, TypeError, AttributeError) as exc:

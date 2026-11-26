@@ -312,6 +312,36 @@ test('blocked periodic ticks alone do not request an immediate follow-up', () =>
     assert.equal(c.polls(), 1);
 });
 
+test('waits for each queued result and acknowledges it before looking for the next', () => {
+    const c = client();
+    const reply = (rows, result_seq, enabled = true) => c.api.pollFinished(JSON.stringify({
+        ...c.lastRequest(), ready: true, supports_result_wait: true,
+        enabled, busy: rows.length > 0, rows, result_seq,
+    }));
+    const job = (id, state) => ({id, state});
+    reply([job('a', 'running'), job('b', 'pending'), job('c', 'pending')], 0);
+    assert.equal(c.polls(), 1);
+    assert.equal(c.lastRequest().wait_for, 'a');
+    c.tick();
+    assert.equal(c.polls(), 1, 'A result wait is already in flight');
+    reply([job('b', 'waiting'), job('c', 'pending')], 1);
+    assert.equal(c.lastRequest().wait_for, 'b');
+    assert.equal(c.lastRequest().ack, 1);
+    c.context.opts.forge_generation_queue_enabled = false;
+    reply([job('c', 'running')], 2, false);
+    assert.equal(c.lastRequest().wait_for, 'c', 'Keep waiting for accepted work after OFF');
+    assert.equal(c.lastRequest().ack, 2);
+    reply([], 3, false);
+    const before = c.polls();
+    c.tick();
+    assert.equal(c.polls(), before + 1);
+    assert.equal(c.lastRequest().wait_for, undefined);
+    assert.equal(c.lastRequest().ack, 3);
+    reply([], 0, false);
+    c.tick();
+    assert.equal(c.polls(), before + 1, 'OFF and idle should stop polling after acknowledgement');
+});
+
 test('pending early refresh survives invalid replies without retrying a stalled request', () => {
     const c = client();
     c.api.submit('old', 'prompt');

@@ -37,6 +37,9 @@
     const japanese = () => /^(?:ja(?:$|[-_ (])|japanese(?:$|[-_ (])|日本語)/i.test(String(opts.localization || "").trim());
     const t = (en, ja) => japanese() ? ja : en;
     const labels = {pending: ["Pending", "待機"], waiting: ["Waiting to start", "実行待ち"], running: ["Generating", "生成中"], done: ["Done", "完了"], cancelled: ["Cancelled", "取消"], failed: ["Failed", "失敗"]};
+    const isActive = row => ["pending", "waiting", "running"].includes(row.state);
+    const resultJob = () => state.supports_result_wait === true && !error &&
+        (state.rows || []).find(row => isActive(row) && !row.cancelling);
 
     function command(value) {
         commands.push({command: value, command_id: uuid()});
@@ -95,7 +98,7 @@
         if (!panel || !box) return;
         // Keep Gradio components in their original DOM tree (delegated events).
         // Server history is retained for result delivery and diagnostics, not queue rows.
-        const active = (state.rows || []).filter(row => ["pending", "waiting", "running"].includes(row.state));
+        const active = (state.rows || []).filter(isActive);
         const ownBusy = active.length > 0;
         const sending = Date.now() < sendingUntil;
         const mode = (state.ready || sending) && (enabled() || ownBusy);
@@ -258,12 +261,15 @@
             return optionsReady ? dispatch() : waitForOptions().then(dispatch);
         },
         pollArgs() {
+            const waitFor = !statusDirty && !earlyRefreshPending && !commands.length ? resultJob()?.id : null;
             pollStarted = true;
             inFlight = Date.now();
             statusDirty = false;
             earlyRefreshPending = false;
             pollId = uuid();
-            return JSON.stringify({token, ack, poll_id: pollId, ...(commands[0] || {})});
+            const request = {token, ack, poll_id: pollId, ...(commands[0] || {})};
+            if (waitFor) request.wait_for = waitFor;
+            return JSON.stringify(request);
         },
         pollFinished(value) {
             // On failure Gradio leaves the previous textbox value intact. Its
@@ -309,7 +315,8 @@
                 }
             }
             paint();
-            if (earlyRefreshPending) tick();
+            // Keep one request ready for the next completion while our jobs remain.
+            if (earlyRefreshPending || resultJob() || (state.supports_result_wait && commands.length && !error)) tick();
         },
     };
     onOptionsAvailable(() => {

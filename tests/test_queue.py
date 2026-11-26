@@ -2,7 +2,7 @@ import sys
 import time
 import unittest
 from pathlib import Path
-from threading import Event, current_thread
+from threading import Event, Thread, current_thread
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -53,6 +53,51 @@ class QueueTests(unittest.TestCase):
         result[0]["value"] = "mutated"
         self.assertEqual(q.snapshot((None, "owner"))[1][0]["value"], "C")
         self.assertIsNone(q.snapshot((None, "owner"), snapshot["result_seq"])[1])
+
+    def test_completion_wakes_result_waits_in_reservation_order(self):
+        owner = (None, "owner")
+        gates = {name: Event() for name in "ABC"}
+        for gate in gates.values():
+            self.addCleanup(gate.set)
+
+        def execute(job, queue):
+            if queue.claim(job, lambda: None):
+                gates[job.id].wait(4)
+                return (job.args[0],)
+
+        q = self.make(execute)
+        for name in gates:
+            q.enqueue(name, owner, [name], None)
+
+        acknowledged = 0
+        for name in gates:
+            until(lambda: q.jobs[name].state == "running")
+            waiting = Event()
+            received = []
+            reader = Thread(target=lambda: received.append(q.snapshot(owner, acknowledged, wait_for=name)),
+                            daemon=True)
+            original_wait = q.cv.wait
+
+            def wait(timeout=None):
+                if current_thread() is reader:
+                    waiting.set()
+                    # Make this check depend on the notification, not expiration.
+                    return original_wait(5)
+                return original_wait(timeout)
+
+            with patch.object(q.cv, "wait", side_effect=wait):
+                reader.start()
+                try:
+                    self.assertTrue(waiting.wait(2), "No result wait was entered")
+                finally:
+                    gates[name].set()
+                    reader.join(2)
+                self.assertFalse(reader.is_alive(), "Completion did not wake the waiting result request")
+            state, result = received[0]
+            self.assertEqual(result, (name,))
+            self.assertGreater(state["result_seq"], acknowledged)
+            acknowledged = state["result_seq"]
+        self.assertFalse(q.has_work())
 
     def test_cancel_during_lock_wait_never_starts(self):
         gate = Event()
